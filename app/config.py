@@ -15,7 +15,7 @@ class Config:
 
     # Model settings
     GROQ_MODEL = "llama-3.1-70b-versatile"
-    TTS_VOICE = "hf://kyutai/tts-voices/m-ailabs_louise/casual.wav"
+    TTS_VOICE = "https://huggingface.co/kyutai/tts-voices/blob/main/alba-mackenna/casual.wav"
 
     # Paths 
     BASE_DIR = Path(__file__).parent.parent
