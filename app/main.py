@@ -134,10 +134,12 @@ class ConnectionManager:
         """Send JSON message to frontend"""
         if self.websocket:
             try:
-                await self.websocket.send_json({
-                    "type": message_type,
-                    "data": data
-                })
+                # Check if websocket is still connected
+                if self.websocket.client_state.name == "CONNECTED":
+                    await self.websocket.send_json({
+                        "type": message_type,
+                        "data": data
+                    })
             except Exception as e:
                 print(f"Error sending message: {e}")
 
@@ -145,6 +147,10 @@ class ConnectionManager:
         """Send audio data to frontend"""
         if self.websocket:
             try:
+                # Check if websocket is still connected
+                if self.websocket.client_state.name != "CONNECTED":
+                    return
+
                 # Send sample rate first
                 await self.websocket.send_json({
                     "type": "audio_config",
@@ -186,6 +192,11 @@ async def websocket_endpoint(websocket: WebSocket):
         # Main message loop
         while True:
             try:
+                # Check if websocket is still connected
+                if websocket.client_state.name != "CONNECTED":
+                    print("🔌 WebSocket no longer connected, breaking loop")
+                    break
+
                 # Receive message with timeout
                 data = await asyncio.wait_for(
                     websocket.receive(),

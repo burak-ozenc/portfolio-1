@@ -2,10 +2,7 @@
 let ws = null;
 let audioContext = null;
 let mediaStream = null;
-let mediaRecorder = null;
 let isRecording = false;
-let audioChunksInterval = null;
-let pcmConverter = null; // Reusable audio context for conversion
 
 // Audio configuration
 const SAMPLE_RATE = 16000;
@@ -111,6 +108,10 @@ function handleMessage(message) {
             console.log('Audio config:', data);
             break;
 
+        case 'pong':
+            // Keepalive response - connection is alive
+            break;
+
         case 'error':
             showError(data);
             break;
@@ -199,50 +200,40 @@ async function startRecording() {
             }
         });
 
-        // Create audio context for processing
+        // Create audio context for RAW audio processing
         audioContext = new (window.AudioContext || window.webkitAudioContext)({
             sampleRate: SAMPLE_RATE
         });
 
-        // Create MediaRecorder
-        const options = {
-            mimeType: 'audio/webm;codecs=opus',
-            audioBitsPerSecond: 16000
-        };
+        // Create media stream source
+        const source = audioContext.createMediaStreamSource(mediaStream);
 
-        mediaRecorder = new MediaRecorder(mediaStream, options);
+        // Create script processor for raw audio samples
+        // Buffer size: 4096 samples = ~256ms at 16kHz
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
 
-        // Collect audio chunks
-        const audioChunks = [];
+        processor.onaudioprocess = (e) => {
+            if (!isRecording) return;
 
-        mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-                audioChunks.push(event.data);
+            // Get raw PCM samples (Float32Array)
+            const inputData = e.inputBuffer.getChannelData(0);
 
-                // Convert and send immediately
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    const arrayBuffer = reader.result;
+            // Convert Float32 to Int16 PCM
+            const pcmData = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+                const sample = Math.max(-1, Math.min(1, inputData[i]));
+                pcmData[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+            }
 
-                    // Convert to PCM
-                    convertToPCM(arrayBuffer).then(pcmData => {
-                        if (ws.readyState === WebSocket.OPEN) {
-                            ws.send(pcmData);
-                        }
-                    });
-                };
-                reader.readAsArrayBuffer(event.data);
+            // Send to server
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(pcmData.buffer);
             }
         };
 
-        mediaRecorder.start();
-
-        // Request data every 100ms
-        audioChunksInterval = setInterval(() => {
-            if (mediaRecorder.state === 'recording') {
-                mediaRecorder.requestData();
-            }
-        }, CHUNK_INTERVAL);
+        // Connect nodes: source -> processor -> destination (for monitoring)
+        source.connect(processor);
+        processor.connect(audioContext.destination);
 
         isRecording = true;
 
@@ -256,13 +247,11 @@ async function startRecording() {
 }
 
 async function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
-    }
+    isRecording = false;
 
-    if (audioChunksInterval) {
-        clearInterval(audioChunksInterval);
-        audioChunksInterval = null;
+    if (audioContext) {
+        await audioContext.close();
+        audioContext = null;
     }
 
     if (mediaStream) {
@@ -270,47 +259,9 @@ async function stopRecording() {
         mediaStream = null;
     }
 
-    if (audioContext) {
-        await audioContext.close();
-        audioContext = null;
-    }
-
-    isRecording = false;
-
     // Send stop message
     if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'stop' }));
-    }
-}
-
-async function convertToPCM(arrayBuffer) {
-    try {
-        // Create or reuse audio context for conversion
-        if (!pcmConverter || pcmConverter.state === 'closed') {
-            pcmConverter = new (window.AudioContext || window.webkitAudioContext)({
-                sampleRate: SAMPLE_RATE
-            });
-        }
-
-        // Decode audio data
-        const audioBuffer = await pcmConverter.decodeAudioData(arrayBuffer);
-
-        // Get channel data
-        const channelData = audioBuffer.getChannelData(0);
-
-        // Convert to 16-bit PCM
-        const pcmData = new Int16Array(channelData.length);
-        for (let i = 0; i < channelData.length; i++) {
-            // Clamp and convert to 16-bit
-            const sample = Math.max(-1, Math.min(1, channelData[i]));
-            pcmData[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-        }
-
-        return pcmData.buffer;
-
-    } catch (error) {
-        console.error('Error converting to PCM:', error);
-        return new ArrayBuffer(0);
     }
 }
 
@@ -390,8 +341,5 @@ window.addEventListener('beforeunload', async () => {
     }
     if (ws) {
         ws.close();
-    }
-    if (pcmConverter && pcmConverter.state !== 'closed') {
-        await pcmConverter.close();
     }
 });
