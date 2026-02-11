@@ -34,7 +34,7 @@ class STTHandler:
                         language="en",
                         response_format="text"
                     )
-
+                print("transcription: ",transcription)
                 return transcription.text
             finally:
                 # Clean up temp file
