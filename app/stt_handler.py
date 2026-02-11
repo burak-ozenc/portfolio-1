@@ -1,58 +1,44 @@
-﻿import torch
-import torchaudio
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+﻿from groq import Groq
 from app.config import config
-import io
-import numpy as np
+import tempfile
+import os
+import wave
+import struct
 
 class STTHandler:
     def __init__(self):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.model_id = "kyutai/stt-2.6b-en-trfs"
-
-        print(f"Loading STT model on {self.device}...")
-        self.processor = AutoProcessor.from_pretrained(
-            self.model_id,
-            token=config.HF_TOKEN
-        )
-        self.model = AutoModelForSpeechSeq2Seq.from_pretrained(
-            self.model_id,
-            torch_dtype=torch.float32,
-            token=config.HF_TOKEN
-        ).to(self.device)
-        print("STT model loaded successfully")
+        self.client = Groq(api_key=config.GROQ_API_KEY)
+        print("STT Handler initialized with Groq Whisper API")
 
     async def transcribe(self, audio_bytes: bytes) -> str:
-        """Transcribe audio bytes to text"""
+        """Transcribe audio bytes to text using Groq Whisper"""
         try:
-            # Convert bytes to tensor
-            audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
-            audio_float = audio_array.astype(np.float32) / 32768.0
+            # Create a proper WAV file from PCM data
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio:
+                temp_path = temp_audio.name
 
-            # Convert to tensor
-            waveform = torch.from_numpy(audio_float).unsqueeze(0)
+            # Write WAV file with proper headers
+            with wave.open(temp_path, 'wb') as wav_file:
+                # Set WAV parameters
+                wav_file.setnchannels(1)  # Mono
+                wav_file.setsampwidth(2)  # 16-bit
+                wav_file.setframerate(16000)  # 16kHz
+                wav_file.writeframes(audio_bytes)
 
-            # Resample to 16kHz if needed
-            sample_rate = 16000  # Assuming 16kHz input
+            try:
+                # Transcribe using Groq Whisper
+                with open(temp_path, 'rb') as audio_file:
+                    transcription = self.client.audio.transcriptions.create(
+                        file=(temp_path, audio_file.read(), "audio/wav"),
+                        model="whisper-large-v3",
+                        language="en",
+                        response_format="text"
+                    )
 
-            # Process audio
-            inputs = self.processor(
-                waveform.squeeze().numpy(),
-                sampling_rate=sample_rate,
-                return_tensors="pt"
-            ).to(self.device)
-
-            # Generate transcription
-            with torch.no_grad():
-                generated_ids = self.model.generate(**inputs)
-
-            # Decode
-            transcription = self.processor.batch_decode(
-                generated_ids,
-                skip_special_tokens=True
-            )[0]
-
-            return transcription
+                return transcription
+            finally:
+                # Clean up temp file
+                os.unlink(temp_path)
 
         except Exception as e:
             print(f"STT Error: {e}")
