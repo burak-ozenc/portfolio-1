@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Talk to Burak</title>
+    <title>Talk to Burak - Voice Portfolio</title>
     <style>
         * {
             margin: 0;
@@ -12,7 +12,7 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
@@ -23,122 +23,292 @@
 
         .container {
             background: white;
-            border-radius: 20px;
-            padding: 40px;
+            border-radius: 24px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             max-width: 600px;
             width: 100%;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
         }
 
-        h1 {
+        .header {
             text-align: center;
-            color: #333;
-            margin-bottom: 10px;
-        }
-
-        .subtitle {
-            text-align: center;
-            color: #666;
             margin-bottom: 30px;
         }
 
-        .mic-button {
-            width: 120px;
-            height: 120px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            cursor: pointer;
+        .header h1 {
+            color: #2d3748;
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: #718096;
+            font-size: 14px;
+        }
+
+        .status-bar {
+            background: #f7fafc;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
             display: flex;
             align-items: center;
-            justify-content: center;
-            margin: 0 auto 30px;
-            transition: transform 0.2s, box-shadow 0.2s;
+            gap: 12px;
         }
 
-        .mic-button:hover {
-            transform: scale(1.05);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #cbd5e0;
+            animation: pulse 2s infinite;
         }
 
-        .mic-button:active {
-            transform: scale(0.95);
+        .status-indicator.ready {
+            background: #48bb78;
         }
 
-        .mic-button.recording {
-            background: #e74c3c;
-            animation: pulse 1.5s infinite;
+        .status-indicator.listening {
+            background: #4299e1;
+            animation: pulse 1s infinite;
+        }
+
+        .status-indicator.thinking {
+            background: #ed8936;
+            animation: pulse 0.8s infinite;
+        }
+
+        .status-indicator.speaking {
+            background: #9f7aea;
+            animation: pulse 1s infinite;
         }
 
         @keyframes pulse {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); }
-            50% { box-shadow: 0 0 0 20px rgba(231, 76, 60, 0); }
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
         }
 
-        .mic-icon {
-            width: 50px;
-            height: 50px;
-            fill: white;
+        .status-text {
+            color: #4a5568;
+            font-size: 14px;
+            font-weight: 500;
         }
 
-        .status {
-            text-align: center;
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            min-height: 50px;
-        }
-
-        .transcript {
-            background: #f8f9fa;
+        .transcription-box {
+            background: #f7fafc;
+            border-radius: 12px;
             padding: 20px;
-            border-radius: 10px;
             margin-bottom: 20px;
-            min-height: 100px;
+            min-height: 150px;
             max-height: 300px;
             overflow-y: auto;
         }
 
-        .message {
-            margin-bottom: 15px;
-            padding: 10px;
+        .transcription-label {
+            color: #718096;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .transcription-content {
+            color: #2d3748;
+            font-size: 16px;
+            line-height: 1.6;
+            min-height: 40px;
+        }
+
+        .transcription-partial {
+            color: #718096;
+            font-style: italic;
+        }
+
+        .transcription-final {
+            color: #2d3748;
+            font-weight: 500;
+        }
+
+        .response-box {
+            background: #edf2f7;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            min-height: 100px;
+            display: none;
+        }
+
+        .response-box.visible {
+            display: block;
+        }
+
+        .response-label {
+            color: #667eea;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .response-content {
+            color: #2d3748;
+            font-size: 16px;
+            line-height: 1.6;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 16px 32px;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            flex: 1;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #cbd5e0;
+        }
+
+        .mic-icon {
+            width: 20px;
+            height: 20px;
+        }
+
+        .error-message {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 12px 16px;
             border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
         }
 
-        .user-message {
-            background: #e3f2fd;
-            text-align: right;
+        .error-message.visible {
+            display: block;
         }
 
-        .assistant-message {
-            background: #f3e5f5;
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #718096;
+            font-size: 12px;
         }
 
-        .label {
-            font-weight: bold;
-            font-size: 0.85em;
-            margin-bottom: 5px;
-            color: #666;
+        /* Loading animation */
+        .loading-dots {
+            display: inline-flex;
+            gap: 4px;
+        }
+
+        .loading-dots span {
+            width: 6px;
+            height: 6px;
+            background: #718096;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .loading-dots span:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+
+        .loading-dots span:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+
+        @keyframes bounce {
+            0%, 80%, 100% {
+                transform: scale(0);
+            }
+            40% {
+                transform: scale(1);
+            }
         }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>🎙️ Talk to Burak</h1>
-    <p class="subtitle">Click the microphone and start speaking</p>
+    <div class="header">
+        <h1>🎙️ Talk to Burak</h1>
+        <p>Voice-enabled AI portfolio assistant</p>
+    </div>
 
-    <button class="mic-button" id="micButton">
-        <svg class="mic-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-        </svg>
-    </button>
+    <div class="status-bar">
+        <div class="status-indicator" id="statusIndicator"></div>
+        <div class="status-text" id="statusText">Connecting...</div>
+    </div>
 
-    <div class="status" id="status">Ready to listen...</div>
+    <div class="error-message" id="errorMessage"></div>
 
-    <div class="transcript" id="transcript">
-        <p style="color: #999; text-align: center;">Conversation will appear here...</p>
+    <div class="transcription-box">
+        <div class="transcription-label">You're saying:</div>
+        <div class="transcription-content" id="transcriptionContent">
+            <span class="transcription-partial" id="partialText"></span>
+            <span class="transcription-final" id="finalText"></span>
+        </div>
+    </div>
+
+    <div class="response-box" id="responseBox">
+        <div class="response-label">Burak says:</div>
+        <div class="response-content" id="responseContent"></div>
+    </div>
+
+    <div class="controls">
+        <button class="btn btn-primary" id="talkBtn" disabled>
+            <svg class="mic-icon" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clip-rule="evenodd"/>
+            </svg>
+            <span id="talkBtnText">Start Talking</span>
+        </button>
+        <button class="btn btn-secondary" id="resetBtn">
+            Reset
+        </button>
+    </div>
+
+    <div class="footer">
+        Powered by Deepgram, Groq & Pocket TTS
     </div>
 </div>
 
