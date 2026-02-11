@@ -1,13 +1,14 @@
-﻿import os
+﻿
+import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 class Config:
     # API Keys
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 
     # Server settings
     HOST = "0.0.0.0"
@@ -15,15 +16,26 @@ class Config:
 
     # Model settings
     GROQ_MODEL = "openai/gpt-oss-120b"
-    TTS_VOICE = "alba"
 
-    # Paths 
+    # TTS settings
+    TTS_VOICE = "alba"  # Pocket TTS voice (will be replaced with custom voice later)
+
+    # Deepgram STT settings
+    DEEPGRAM_MODEL = "nova-2"  # Latest, most accurate model
+    DEEPGRAM_LANGUAGE = "en"
+    DEEPGRAM_SAMPLE_RATE = 16000
+    DEEPGRAM_ENCODING = "linear16"
+    DEEPGRAM_CHANNELS = 1
+
+    # VAD settings
+    SILENCE_THRESHOLD = 1.5  # seconds of silence to consider speech ended
+
+    # Paths
     BASE_DIR = Path(__file__).parent.parent
     SYSTEM_PROMPT_PATH = BASE_DIR / "config" / "system_prompt.txt"
 
     @classmethod
     def load_system_prompt(cls) -> str:
-        """Load system prompt from file"""
         try:
             with open(cls.SYSTEM_PROMPT_PATH, 'r', encoding='utf-8') as f:
                 return f.read()
@@ -32,9 +44,9 @@ class Config:
 
     @classmethod
     def validate(cls):
-        """Validate required configuration"""
         if not cls.GROQ_API_KEY:
-            raise ValueError("GROQ_API_KEY not found in environment")
+            raise ValueError("GROQ_API_KEY not found")
+        if not cls.DEEPGRAM_API_KEY:
+            raise ValueError("DEEPGRAM_API_KEY not found")
 
-# Create config instance
 config = Config()

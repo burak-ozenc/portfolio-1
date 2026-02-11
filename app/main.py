@@ -1,9 +1,8 @@
 ﻿from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-from fastapi.middleware.cors import CORSMiddleware
 import json
-import base64
+import asyncio
 from pathlib import Path
 
 from app.config import config
@@ -11,130 +10,228 @@ from app.stt_handler import STTHandler
 from app.llm_handler import LLMHandler
 from app.tts_handler import TTSHandler
 
+# Validate config
+config.validate()
+
 # Initialize FastAPI
 app = FastAPI(title="Voice Portfolio Assistant")
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Mount static files for frontend
+frontend_dir = Path(__file__).parent.parent / "frontend"
+app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
 
-# Initialize handlers (loaded once at startup)
-stt_handler = None
-llm_handler = None
-tts_handler = None
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize models on startup"""
-    global stt_handler, llm_handler, tts_handler
+class ConnectionManager:
+    """Manages WebSocket connections and conversation state"""
 
-    print("Validating configuration...")
-    config.validate()
+    def __init__(self):
+        self.stt_handler: STTHandler = None
+        self.llm_handler: LLMHandler = None
+        self.tts_handler: TTSHandler = None
+        self.websocket: WebSocket = None
+        self.current_transcription = ""
+        self.is_processing = False
 
-    print("Loading models...")
-    stt_handler = STTHandler()
-    llm_handler = LLMHandler()
-    tts_handler = TTSHandler()
-    print("All models loaded successfully!")
+    async def initialize(self, websocket: WebSocket):
+        """Initialize handlers for a new connection"""
+        self.websocket = websocket
 
-# Serve static frontend files
-frontend_path = Path(__file__).parent.parent / "frontend"
-if frontend_path.exists():
-    app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
+        # Initialize handlers
+        print("Initializing handlers...")
+        self.stt_handler = STTHandler()
+        self.llm_handler = LLMHandler()
+
+        # Initialize TTS (might take a moment to load model)
+        if not self.tts_handler:
+            await self.send_message("status", "loading_tts")
+            self.tts_handler = TTSHandler()
+
+        await self.send_message("status", "ready")
+
+    async def start_conversation(self):
+        """Start a new conversation session"""
+        self.current_transcription = ""
+        self.is_processing = False
+
+        # Connect to Deepgram
+        await self.stt_handler.connect(
+            transcription_callback=self.on_transcription,
+            final_callback=self.on_speech_end
+        )
+
+        await self.send_message("status", "listening")
+
+    async def on_transcription(self, text: str, is_final: bool):
+        """Called when transcription received from Deepgram"""
+        if is_final:
+            # Append to current transcription
+            if text.strip():
+                if self.current_transcription:
+                    self.current_transcription += " " + text
+                else:
+                    self.current_transcription = text
+
+        # Send to frontend (both partial and final)
+        await self.send_message("transcription", {
+            "text": text,
+            "is_final": is_final,
+            "full_text": self.current_transcription
+        })
+
+    async def on_speech_end(self):
+        """Called when speech ends (silence detected)"""
+        if self.is_processing:
+            return
+
+        if not self.current_transcription.strip():
+            return
+
+        self.is_processing = True
+
+        # Close STT connection
+        await self.stt_handler.close()
+
+        # Send thinking status
+        await self.send_message("status", "thinking")
+
+        try:
+            # Get LLM response
+            print(f"User: {self.current_transcription}")
+            llm_response = await self.llm_handler.generate_response(
+                self.current_transcription
+            )
+            print(f"Assistant: {llm_response}")
+
+            # Send LLM response to frontend
+            await self.send_message("response", llm_response)
+
+            # Generate TTS audio
+            await self.send_message("status", "speaking")
+            audio_bytes = await self.tts_handler.synthesize(llm_response)
+
+            # Send audio to frontend
+            await self.send_audio(audio_bytes)
+
+            # Reset for next turn
+            self.current_transcription = ""
+            self.is_processing = False
+
+            # Ready for next input
+            await self.send_message("status", "ready")
+
+        except Exception as e:
+            print(f"Error in conversation: {e}")
+            await self.send_message("error", str(e))
+            self.is_processing = False
+            await self.send_message("status", "ready")
+
+    async def process_audio_chunk(self, audio_data: bytes):
+        """Process incoming audio chunk"""
+        if self.stt_handler and not self.is_processing:
+            await self.stt_handler.send_audio(audio_data)
+
+    async def send_message(self, message_type: str, data):
+        """Send JSON message to frontend"""
+        if self.websocket:
+            try:
+                await self.websocket.send_json({
+                    "type": message_type,
+                    "data": data
+                })
+            except Exception as e:
+                print(f"Error sending message: {e}")
+
+    async def send_audio(self, audio_bytes: bytes):
+        """Send audio data to frontend"""
+        if self.websocket:
+            try:
+                # Send sample rate first
+                await self.websocket.send_json({
+                    "type": "audio_config",
+                    "data": {
+                        "sample_rate": self.tts_handler.get_sample_rate()
+                    }
+                })
+
+                # Send audio data
+                await self.websocket.send_bytes(audio_bytes)
+
+            except Exception as e:
+                print(f"Error sending audio: {e}")
+
+    async def cleanup(self):
+        """Cleanup resources"""
+        if self.stt_handler:
+            await self.stt_handler.close()
+
 
 @app.get("/")
 async def root():
-    """Serve the main page"""
-    index_file = frontend_path / "index.html"
-    if index_file.exists():
-        return HTMLResponse(content=index_file.read_text())
-    return {"message": "Voice Portfolio Assistant API"}
+    """Serve frontend"""
+    return FileResponse(frontend_dir / "index.html")
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "models_loaded": all([stt_handler, llm_handler, tts_handler])
-    }
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time audio communication"""
+    """WebSocket endpoint for voice conversation"""
     await websocket.accept()
-    print("WebSocket connection established")
+    print("🔌 Client connected")
+
+    manager = ConnectionManager()
 
     try:
+        # Initialize connection
+        await manager.initialize(websocket)
+
+        # Main message loop
         while True:
-            # Receive message from client
-            data = await websocket.receive_text()
-            message = json.loads(data)
+            # Receive message
+            data = await websocket.receive()
 
-            msg_type = message.get("type")
+            if "text" in data:
+                # JSON message
+                message = json.loads(data["text"])
+                msg_type = message.get("type")
 
-            if msg_type == "audio":
-                # Receive audio data (base64 encoded)
-                audio_b64 = message.get("audio")
-                audio_bytes = base64.b64decode(audio_b64)
+                if msg_type == "start":
+                    # Start new conversation
+                    await manager.start_conversation()
 
-                print("Received audio, transcribing...")
+                elif msg_type == "stop":
+                    # Stop current session
+                    await manager.cleanup()
+                    await manager.send_message("status", "ready")
 
-                # Step 1: Speech to Text
-                transcription = await stt_handler.transcribe(audio_bytes)
-                print(f"Transcription: {transcription}")
+                elif msg_type == "reset":
+                    # Reset conversation history
+                    manager.llm_handler.reset_conversation()
+                    await manager.send_message("status", "ready")
 
-                # Send transcription to client
-                await websocket.send_json({
-                    "type": "transcription",
-                    "text": transcription
-                })
-
-                if not transcription:
-                    continue
-
-                # Step 2: LLM Processing
-                print("Generating LLM response...")
-                response_text = await llm_handler.generate_response(transcription)
-                print(f"LLM Response: {response_text}")
-
-                # Send text response to client
-                await websocket.send_json({
-                    "type": "text_response",
-                    "text": response_text
-                })
-
-                # Step 3: Text to Speech
-                print("Synthesizing speech...")
-                audio_response = await tts_handler.synthesize(response_text)
-
-                # Send audio response (base64 encoded)
-                audio_response_b64 = base64.b64encode(audio_response).decode('utf-8')
-                await websocket.send_json({
-                    "type": "audio_response",
-                    "audio": audio_response_b64,
-                    "sample_rate": tts_handler.get_sample_rate()
-                })
-
-                print("Response sent!")
-
-            elif msg_type == "reset":
-                # Reset conversation
-                llm_handler.reset_conversation()
-                await websocket.send_json({
-                    "type": "reset_confirmed"
-                })
-                print("Conversation reset")
-
-            elif msg_type == "ping":
-                await websocket.send_json({"type": "pong"})
+            elif "bytes" in data:
+                # Audio chunk
+                audio_chunk = data["bytes"]
+                await manager.process_audio_chunk(audio_chunk)
 
     except WebSocketDisconnect:
-        print("WebSocket disconnected")
+        print("🔌 Client disconnected")
+        await manager.cleanup()
+
     except Exception as e:
-        print(f"WebSocket error: {e}")
-        await websocket.close()
+        print(f"❌ WebSocket error: {e}")
+        await manager.cleanup()
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        app,
+        host=config.HOST,
+        port=config.PORT,
+        log_level="info"
+    )
