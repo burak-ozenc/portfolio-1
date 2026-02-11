@@ -3,8 +3,9 @@ uvicorn[standard]==0.32.0
 websockets==13.1
 python-multipart==0.0.21
 aiofiles==24.1.0
-groq==0.11.0
+groq==0.9.0
 python-dotenv==1.0.1
 pocket-tts==1.0.3
 numpy>=2.0.0
 scipy==1.14.1
+httpx==0.27.0
