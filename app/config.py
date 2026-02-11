@@ -14,7 +14,7 @@ class Config:
     PORT = 7860
 
     # Model settings
-    GROQ_MODEL = "llama-3.1-70b-versatile"
+    GROQ_MODEL = "openai/gpt-oss-120b"
     TTS_VOICE = "alba"
 
     # Paths 
