@@ -6,11 +6,9 @@ RUN useradd -m -u 1000 user
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install minimal system dependencies
 RUN apt-get update && apt-get install -y \
     git \
-    ffmpeg \
-    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install
