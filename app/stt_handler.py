@@ -1,6 +1,7 @@
 ﻿from groq import Groq
 from app.config import config
 import tempfile
+import wave
 import os
 
 class STTHandler:
@@ -12,17 +13,26 @@ class STTHandler:
         """Transcribe audio bytes to text using Groq Whisper"""
         try:
             # Save audio to temporary file (Groq needs file-like object)
+            # Create a proper WAV file from PCM data
             with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_audio:
-                temp_audio.write(audio_bytes)
                 temp_path = temp_audio.name
+
+            # Write WAV file with proper headers
+            with wave.open(temp_path, 'wb') as wav_file:
+                # Set WAV parameters
+                wav_file.setnchannels(1)  # Mono
+                wav_file.setsampwidth(2)  # 16-bit
+                wav_file.setframerate(16000)  # 16kHz
+                wav_file.writeframes(audio_bytes)
 
             try:
                 # Transcribe using Groq Whisper
                 with open(temp_path, 'rb') as audio_file:
                     transcription = self.client.audio.transcriptions.create(
-                        file=audio_file,
+                        file=(temp_path, audio_file.read(), "audio/wav"),
                         model="whisper-large-v3",
-                        language="en"
+                        language="en",
+                        response_format="text"
                     )
 
                 return transcription.text
