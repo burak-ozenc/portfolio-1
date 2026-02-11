@@ -34,8 +34,8 @@ class STTHandler:
                         language="en",
                         response_format="text"
                     )
-                print("transcription: ",transcription)
-                return transcription.text
+
+                return transcription
             finally:
                 # Clean up temp file
                 os.unlink(temp_path)
