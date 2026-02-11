@@ -134,7 +134,8 @@ function handleStatusUpdate(status) {
 
         case 'listening':
             updateStatus('listening', 'Listening...');
-            talkBtnText.textContent = 'Stop';
+            talkBtnText.textContent = 'Stop Speaking';
+            talkBtn.disabled = false;
             break;
 
         case 'thinking':

@@ -63,6 +63,8 @@ class ConnectionManager:
 
     async def on_transcription(self, text: str, is_final: bool):
         """Called when transcription received from Deepgram"""
+        print(f"📨 Received transcription: '{text}' | is_final={is_final}")
+
         if is_final:
             # Append to current transcription
             if text.strip():
@@ -70,6 +72,7 @@ class ConnectionManager:
                     self.current_transcription += " " + text
                 else:
                     self.current_transcription = text
+                print(f"📝 Full transcription so far: '{self.current_transcription}'")
 
         # Send to frontend (both partial and final)
         await self.send_message("transcription", {
@@ -80,15 +83,20 @@ class ConnectionManager:
 
     async def on_speech_end(self):
         """Called when speech ends (silence detected)"""
+        print(f"🎤 Speech ended | is_processing={self.is_processing} | transcription='{self.current_transcription}'")
+
         if self.is_processing:
+            print("⚠️ Already processing, ignoring")
             return
 
         if not self.current_transcription.strip():
+            print("⚠️ No transcription to process")
             return
 
         self.is_processing = True
 
         # Close STT connection
+        print("🔌 Closing STT connection...")
         await self.stt_handler.close()
 
         # Send thinking status
@@ -96,20 +104,22 @@ class ConnectionManager:
 
         try:
             # Get LLM response
-            print(f"User: {self.current_transcription}")
+            print(f"🤖 Sending to LLM: {self.current_transcription}")
             llm_response = await self.llm_handler.generate_response(
                 self.current_transcription
             )
-            print(f"Assistant: {llm_response}")
+            print(f"💬 LLM response: {llm_response}")
 
             # Send LLM response to frontend
             await self.send_message("response", llm_response)
 
             # Generate TTS audio
             await self.send_message("status", "speaking")
+            print("🔊 Generating TTS...")
             audio_bytes = await self.tts_handler.synthesize(llm_response)
 
             # Send audio to frontend
+            print(f"📤 Sending audio ({len(audio_bytes)} bytes)")
             await self.send_audio(audio_bytes)
 
             # Reset for next turn
@@ -118,9 +128,12 @@ class ConnectionManager:
 
             # Ready for next input
             await self.send_message("status", "ready")
+            print("✅ Response complete, ready for next input")
 
         except Exception as e:
-            print(f"Error in conversation: {e}")
+            print(f"❌ Error in conversation: {e}")
+            import traceback
+            traceback.print_exc()
             await self.send_message("error", str(e))
             self.is_processing = False
             await self.send_message("status", "ready")
@@ -214,9 +227,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             await manager.start_conversation()
 
                         elif msg_type == "stop":
-                            # Stop current session
-                            await manager.cleanup()
-                            await manager.send_message("status", "ready")
+                            # User stopped speaking - process the transcription
+                            print("🛑 User clicked stop")
+                            await manager.on_speech_end()
 
                         elif msg_type == "reset":
                             # Reset conversation history
