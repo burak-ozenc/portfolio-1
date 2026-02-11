@@ -6,7 +6,7 @@ aiofiles==23.2.1
 groq==0.4.0
 python-dotenv==1.0.0
 pocket-tts==1.0.0
-torch==2.1.0
+torch==2.5.0
 torchaudio==2.1.0
 transformers==4.35.0
 huggingface-hub==0.19.4
