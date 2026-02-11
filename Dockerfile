@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # Create user with UID 1000 (HF Spaces requirement)
 RUN useradd -m -u 1000 user
@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements and install
 COPY --chown=user:user requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY --chown=user:user . .
