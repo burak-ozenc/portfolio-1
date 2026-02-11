@@ -17,7 +17,7 @@ class Config:
     GROQ_MODEL = "llama-3.1-70b-versatile"
     TTS_VOICE = "hf://kyutai/tts-voices/m-ailabs_louise/casual.wav"
 
-    # Paths
+    # Paths 
     BASE_DIR = Path(__file__).parent.parent
     SYSTEM_PROMPT_PATH = BASE_DIR / "config" / "system_prompt.txt"
 
