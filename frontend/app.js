@@ -5,6 +5,7 @@ let mediaStream = null;
 let mediaRecorder = null;
 let isRecording = false;
 let audioChunksInterval = null;
+let pcmConverter = null; // Reusable audio context for conversion
 
 // Audio configuration
 const SAMPLE_RATE = 16000;
@@ -24,6 +25,14 @@ const responseContent = document.getElementById('responseContent');
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 Page loaded, initializing...');
+
+    // Catch any unhandled errors
+    window.addEventListener('error', (event) => {
+        console.error('💥 Unhandled error:', event.error);
+        showError('JavaScript error: ' + event.error.message);
+    });
+
     initializeWebSocket();
 
     talkBtn.addEventListener('click', toggleRecording);
@@ -42,6 +51,13 @@ function initializeWebSocket() {
         console.log('✅ Connected to server');
         updateStatus('ready', 'Ready to talk');
         talkBtn.disabled = false;
+
+        // Send keepalive ping every 30 seconds
+        setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000);
     };
 
     ws.onmessage = async (event) => {
@@ -268,27 +284,34 @@ async function stopRecording() {
 }
 
 async function convertToPCM(arrayBuffer) {
-    // Decode audio data
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: SAMPLE_RATE
-    });
+    try {
+        // Create or reuse audio context for conversion
+        if (!pcmConverter || pcmConverter.state === 'closed') {
+            pcmConverter = new (window.AudioContext || window.webkitAudioContext)({
+                sampleRate: SAMPLE_RATE
+            });
+        }
 
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        // Decode audio data
+        const audioBuffer = await pcmConverter.decodeAudioData(arrayBuffer);
 
-    // Get channel data
-    const channelData = audioBuffer.getChannelData(0);
+        // Get channel data
+        const channelData = audioBuffer.getChannelData(0);
 
-    // Convert to 16-bit PCM
-    const pcmData = new Int16Array(channelData.length);
-    for (let i = 0; i < channelData.length; i++) {
-        // Clamp and convert to 16-bit
-        const sample = Math.max(-1, Math.min(1, channelData[i]));
-        pcmData[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+        // Convert to 16-bit PCM
+        const pcmData = new Int16Array(channelData.length);
+        for (let i = 0; i < channelData.length; i++) {
+            // Clamp and convert to 16-bit
+            const sample = Math.max(-1, Math.min(1, channelData[i]));
+            pcmData[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+        }
+
+        return pcmData.buffer;
+
+    } catch (error) {
+        console.error('Error converting to PCM:', error);
+        return new ArrayBuffer(0);
     }
-
-    await audioContext.close();
-
-    return pcmData.buffer;
 }
 
 async function playAudio(audioData) {
@@ -361,11 +384,14 @@ function showError(message) {
 }
 
 // Cleanup on page unload
-window.addEventListener('beforeunload', () => {
+window.addEventListener('beforeunload', async () => {
     if (isRecording) {
-        stopRecording();
+        await stopRecording();
     }
     if (ws) {
         ws.close();
+    }
+    if (pcmConverter && pcmConverter.state !== 'closed') {
+        await pcmConverter.close();
     }
 });

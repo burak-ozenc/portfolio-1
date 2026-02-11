@@ -185,40 +185,62 @@ async def websocket_endpoint(websocket: WebSocket):
 
         # Main message loop
         while True:
-            # Receive message
-            data = await websocket.receive()
+            try:
+                # Receive message with timeout
+                data = await asyncio.wait_for(
+                    websocket.receive(),
+                    timeout=300.0  # 5 minutes timeout
+                )
 
-            if "text" in data:
-                # JSON message
-                message = json.loads(data["text"])
-                msg_type = message.get("type")
+                if "text" in data:
+                    # JSON message
+                    try:
+                        message = json.loads(data["text"])
+                        msg_type = message.get("type")
 
-                if msg_type == "start":
-                    # Start new conversation
-                    await manager.start_conversation()
+                        if msg_type == "start":
+                            # Start new conversation
+                            await manager.start_conversation()
 
-                elif msg_type == "stop":
-                    # Stop current session
-                    await manager.cleanup()
-                    await manager.send_message("status", "ready")
+                        elif msg_type == "stop":
+                            # Stop current session
+                            await manager.cleanup()
+                            await manager.send_message("status", "ready")
 
-                elif msg_type == "reset":
-                    # Reset conversation history
-                    manager.llm_handler.reset_conversation()
-                    await manager.send_message("status", "ready")
+                        elif msg_type == "reset":
+                            # Reset conversation history
+                            manager.llm_handler.reset_conversation()
+                            await manager.send_message("status", "ready")
 
-            elif "bytes" in data:
-                # Audio chunk
-                audio_chunk = data["bytes"]
-                await manager.process_audio_chunk(audio_chunk)
+                        elif msg_type == "ping":
+                            # Keepalive ping - respond with pong
+                            await manager.send_message("pong", "ok")
+
+                    except json.JSONDecodeError as e:
+                        print(f"Invalid JSON: {e}")
+                        continue
+
+                elif "bytes" in data:
+                    # Audio chunk
+                    audio_chunk = data["bytes"]
+                    await manager.process_audio_chunk(audio_chunk)
+
+            except asyncio.TimeoutError:
+                # Timeout waiting for data - check if still connected
+                print("⏱️ Receive timeout - connection idle")
+                break
 
     except WebSocketDisconnect:
-        print("🔌 Client disconnected")
-        await manager.cleanup()
+        print("🔌 Client disconnected normally")
 
     except Exception as e:
         print(f"❌ WebSocket error: {e}")
+        import traceback
+        traceback.print_exc()
+
+    finally:
         await manager.cleanup()
+        print("✅ Cleanup completed")
 
 
 @app.get("/health")
