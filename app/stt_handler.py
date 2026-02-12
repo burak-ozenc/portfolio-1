@@ -21,6 +21,7 @@ class STTHandler:
         self.final_callback = None
         self.last_speech_time = None
         self.silence_timer_task = None
+        self.has_triggered_end = False  # Prevent multiple triggers
 
         print("STT Handler initialized")
 
@@ -38,6 +39,7 @@ class STTHandler:
         """
         self.transcription_callback = transcription_callback
         self.final_callback = final_callback
+        self.has_triggered_end = False  # Reset flag for new conversation
 
         try:
             # Configure Deepgram client
@@ -88,6 +90,9 @@ class STTHandler:
     async def _on_transcript(self, *args, **kwargs):
         """Called when transcription received"""
         try:
+            import time
+            receive_time = time.time()
+
             # Extract result from args
             result = kwargs.get('result') or (args[1] if len(args) > 1 else args[0])
 
@@ -103,7 +108,7 @@ class STTHandler:
             is_final = result.is_final
             speech_final = result.speech_final if hasattr(result, 'speech_final') else False
 
-            print(f"📝 Transcript: '{sentence}' | is_final={is_final} | speech_final={speech_final}")
+            print(f"📝 [{receive_time:.3f}] Transcript: '{sentence}' | is_final={is_final} | speech_final={speech_final}")
 
             # Update last speech time
             self.last_speech_time = asyncio.get_event_loop().time()
@@ -113,9 +118,16 @@ class STTHandler:
                 await self.transcription_callback(sentence, is_final)
 
             # If final OR speech_final, start silence detection timer
-            if is_final or speech_final:
-                print(f"🔔 Starting silence timer (is_final={is_final}, speech_final={speech_final})")
-                self._start_silence_timer()
+            # But ONLY if we don't already have a timer running from a previous final
+            if (is_final or speech_final):
+                if not self.silence_timer_task or self.silence_timer_task.done():
+                    print(f"🔔 Starting NEW silence timer (is_final={is_final}, speech_final={speech_final})")
+                    self._start_silence_timer()
+                else:
+                    print(f"🔄 Restarting silence timer (is_final={is_final}, speech_final={speech_final})")
+                    # Cancel old timer and start new one
+                    self.silence_timer_task.cancel()
+                    self._start_silence_timer()
 
         except Exception as e:
             print(f"Error processing transcript: {e}")
@@ -133,13 +145,25 @@ class STTHandler:
 
     async def _silence_timer(self):
         """Wait for silence threshold, then trigger final callback"""
+        import time
         try:
+            start_time = time.time()
             print(f"⏱️ Silence timer started, waiting {config.SILENCE_THRESHOLD}s...")
             await asyncio.sleep(config.SILENCE_THRESHOLD)
 
             # If we reach here, silence threshold met
-            print(f"✅ Silence threshold met, triggering speech end")
+            elapsed = time.time() - start_time
+            print(f"✅ Silence threshold met after {elapsed:.2f}s")
+
+            # Check if we've already triggered (race condition protection)
+            if self.has_triggered_end:
+                print("⚠️ Callback already triggered, skipping")
+                return
+
+            self.has_triggered_end = True
+
             if self.final_callback:
+                print("📞 Triggering speech end callback...")
                 # Signal that speech has ended
                 await self.final_callback()
             else:
@@ -148,6 +172,7 @@ class STTHandler:
         except asyncio.CancelledError:
             # Timer was cancelled (more speech detected)
             print(f"🔄 Silence timer cancelled (more speech detected)")
+            # Don't raise - just exit gracefully
             pass
 
     async def _on_error(self, *args, **kwargs):

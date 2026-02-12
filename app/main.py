@@ -31,6 +31,8 @@ class ConnectionManager:
         self.websocket: WebSocket = None
         self.current_transcription = ""
         self.is_processing = False
+        self.audio_chunks_received = 0
+        self.last_audio_log_time = 0
 
     async def initialize(self, websocket: WebSocket):
         """Initialize handlers for a new connection"""
@@ -50,16 +52,35 @@ class ConnectionManager:
 
     async def start_conversation(self):
         """Start a new conversation session"""
+        import time
+        start_time = time.time()
+
+        print(f"\n{'='*60}")
+        print(f"🎙️ STARTING NEW CONVERSATION")
+        print(f"{'='*60}\n")
+
         self.current_transcription = ""
         self.is_processing = False
+        self.audio_chunks_received = 0
+        self.last_audio_log_time = time.time()
 
         # Connect to Deepgram
+        connect_start = time.time()
         await self.stt_handler.connect(
             transcription_callback=self.on_transcription,
             final_callback=self.on_speech_end
         )
+        connect_duration = time.time() - connect_start
 
         await self.send_message("status", "listening")
+
+        total_duration = time.time() - start_time
+        print(f"\n{'='*60}")
+        print(f"✅ CONVERSATION STARTED")
+        print(f"{'='*60}")
+        print(f"   Connection Time: {connect_duration:.2f}s")
+        print(f"   Total Time: {total_duration:.2f}s")
+        print(f"{'='*60}\n")
 
     async def on_transcription(self, text: str, is_final: bool):
         """Called when transcription received from Deepgram"""
@@ -83,7 +104,15 @@ class ConnectionManager:
 
     async def on_speech_end(self):
         """Called when speech ends (silence detected)"""
-        print(f"🎤 Speech ended | is_processing={self.is_processing} | transcription='{self.current_transcription}'")
+        import time
+        start_time = time.time()
+
+        print(f"\n{'='*60}")
+        print(f"🎤 SPEECH END TRIGGERED")
+        print(f"{'='*60}")
+        print(f"   is_processing: {self.is_processing}")
+        print(f"   transcription: '{self.current_transcription}'")
+        print(f"{'='*60}\n")
 
         if self.is_processing:
             print("⚠️ Already processing, ignoring")
@@ -93,45 +122,70 @@ class ConnectionManager:
             print("⚠️ No transcription to process")
             return
 
+        # Mark as processing FIRST to prevent race conditions
         self.is_processing = True
+        user_message = self.current_transcription
 
-        # Close STT connection
-        print("🔌 Closing STT connection...")
-        await self.stt_handler.close()
-
-        # Send thinking status
-        await self.send_message("status", "thinking")
+        # Clear transcription for next turn
+        self.current_transcription = ""
 
         try:
+            # Close STT connection (but don't await - let it close in background)
+            print("⏰ [0.0s] Closing STT connection...")
+            if self.stt_handler:
+                asyncio.create_task(self.stt_handler.close())
+
+            # Send thinking status
+            await self.send_message("status", "thinking")
+            print(f"⏰ [{time.time() - start_time:.1f}s] Status: thinking")
+
             # Get LLM response
-            print(f"🤖 Sending to LLM: {self.current_transcription}")
-            llm_response = await self.llm_handler.generate_response(
-                self.current_transcription
-            )
-            print(f"💬 LLM response: {llm_response}")
+            llm_start = time.time()
+            print(f"\n🤖 CALLING LLM")
+            print(f"   Input: '{user_message}'")
+            llm_response = await self.llm_handler.generate_response(user_message)
+            llm_duration = time.time() - llm_start
+            print(f"✅ LLM Response ({llm_duration:.2f}s): '{llm_response[:100]}...'")
 
             # Send LLM response to frontend
             await self.send_message("response", llm_response)
+            print(f"⏰ [{time.time() - start_time:.1f}s] Response sent to frontend")
 
             # Generate TTS audio
             await self.send_message("status", "speaking")
-            print("🔊 Generating TTS...")
+            print(f"⏰ [{time.time() - start_time:.1f}s] Status: speaking")
+
+            tts_start = time.time()
+            print(f"\n🔊 GENERATING TTS ({len(llm_response)} chars)")
             audio_bytes = await self.tts_handler.synthesize(llm_response)
+            tts_duration = time.time() - tts_start
+            print(f"✅ TTS Generated ({tts_duration:.2f}s): {len(audio_bytes)} bytes")
 
             # Send audio to frontend
-            print(f"📤 Sending audio ({len(audio_bytes)} bytes)")
+            send_start = time.time()
             await self.send_audio(audio_bytes)
+            send_duration = time.time() - send_start
+            print(f"✅ Audio Sent ({send_duration:.2f}s)")
 
             # Reset for next turn
-            self.current_transcription = ""
             self.is_processing = False
 
             # Ready for next input
             await self.send_message("status", "ready")
-            print("✅ Response complete, ready for next input")
+
+            total_duration = time.time() - start_time
+            print(f"\n{'='*60}")
+            print(f"✅ RESPONSE COMPLETE")
+            print(f"{'='*60}")
+            print(f"   Total Duration: {total_duration:.2f}s")
+            print(f"   - LLM: {llm_duration:.2f}s")
+            print(f"   - TTS: {tts_duration:.2f}s")
+            print(f"   - Send: {send_duration:.2f}s")
+            print(f"{'='*60}\n")
 
         except Exception as e:
-            print(f"❌ Error in conversation: {e}")
+            print(f"\n❌ ERROR IN CONVERSATION")
+            print(f"   Error: {e}")
             import traceback
             traceback.print_exc()
             await self.send_message("error", str(e))
@@ -140,6 +194,16 @@ class ConnectionManager:
 
     async def process_audio_chunk(self, audio_data: bytes):
         """Process incoming audio chunk"""
+        import time
+
+        self.audio_chunks_received += 1
+        current_time = time.time()
+
+        # Log every 5 seconds
+        if current_time - self.last_audio_log_time >= 5.0:
+            print(f"🎵 Audio streaming: {self.audio_chunks_received} chunks received")
+            self.last_audio_log_time = current_time
+
         if self.stt_handler and not self.is_processing:
             await self.stt_handler.send_audio(audio_data)
 
