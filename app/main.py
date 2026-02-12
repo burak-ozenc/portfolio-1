@@ -182,15 +182,18 @@ class ConnectionManager:
 
             # Send audio to frontend
             send_start = time.time()
+            print(f"\n📤 SENDING AUDIO TO FRONTEND")
             await self.send_audio(audio_bytes)
             send_duration = time.time() - send_start
-            print(f"✅ Audio Sent ({send_duration:.2f}s)")
+            print(f"✅ Audio send completed in {send_duration:.2f}s")
 
             # Reset for next turn
             self.is_processing = False
 
             # Ready for next input
+            print(f"\n📨 SENDING READY STATUS")
             await self.send_message("status", "ready")
+            print(f"✅ Ready status sent")
 
             total_duration = time.time() - start_time
             print(f"\n{'='*60}")
@@ -215,6 +218,11 @@ class ConnectionManager:
         """Process incoming audio chunk"""
         import time
 
+        # Only process audio if we're actively listening (not thinking/speaking)
+        if self.is_processing:
+            # Silently ignore audio during processing
+            return
+
         self.audio_chunks_received += 1
         current_time = time.time()
 
@@ -223,7 +231,7 @@ class ConnectionManager:
             print(f"🎵 Audio streaming: {self.audio_chunks_received} chunks received")
             self.last_audio_log_time = current_time
 
-        if self.stt_handler and not self.is_processing:
+        if self.stt_handler:
             await self.stt_handler.send_audio(audio_data)
 
     async def send_message(self, message_type: str, data):
@@ -243,25 +251,36 @@ class ConnectionManager:
 
     async def send_audio(self, audio_bytes: bytes):
         """Send audio data to frontend"""
-        if self.websocket:
-            try:
-                # Check if websocket is still connected
-                if self.websocket.client_state.name != "CONNECTED":
-                    return
+        if not self.websocket:
+            print(f"⚠️ Cannot send audio: No websocket")
+            return
 
-                # Send sample rate first
-                await self.websocket.send_json({
-                    "type": "audio_config",
-                    "data": {
-                        "sample_rate": self.tts_handler.get_sample_rate()
-                    }
-                })
+        try:
+            # Check if websocket is still connected
+            ws_state = self.websocket.client_state.name
+            print(f"📤 Attempting to send audio: WebSocket state = {ws_state}")
 
-                # Send audio data
-                await self.websocket.send_bytes(audio_bytes)
+            if ws_state != "CONNECTED":
+                print(f"⚠️ Cannot send audio: WebSocket state is {ws_state}")
+                return
 
-            except Exception as e:
-                print(f"Error sending audio: {e}")
+            # Send sample rate first
+            await self.websocket.send_json({
+                "type": "audio_config",
+                "data": {
+                    "sample_rate": self.tts_handler.get_sample_rate()
+                }
+            })
+            print(f"✅ Sent audio config")
+
+            # Send audio data
+            await self.websocket.send_bytes(audio_bytes)
+            print(f"✅ Sent audio bytes: {len(audio_bytes)} bytes")
+
+        except Exception as e:
+            print(f"❌ Error sending audio: {e}")
+            import traceback
+            traceback.print_exc()
 
     async def cleanup(self):
         """Cleanup resources"""
@@ -342,6 +361,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Timeout waiting for data - check if still connected
                 print("⏱️ Receive timeout - connection idle")
                 break
+
+            except Exception as receive_error:
+                # Log the specific error instead of breaking immediately
+                print(f"⚠️ Error in receive loop: {receive_error}")
+                import traceback
+                traceback.print_exc()
+                # Don't break - try to continue if possible
+                await asyncio.sleep(0.1)
+                continue
 
     except WebSocketDisconnect:
         print("🔌 Client disconnected normally")
