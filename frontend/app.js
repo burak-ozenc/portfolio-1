@@ -127,7 +127,15 @@ function handleStatusUpdate(status) {
     switch (status) {
         case 'ready':
             updateStatus('ready', 'Ready - Click to start');
-            if (!isConversationActive) {
+
+            // If conversation is active, automatically restart for next input
+            if (isConversationActive && isRecording) {
+                console.log('🔄 Auto-restarting conversation for next input...');
+                // Send start message to begin new turn
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'start' }));
+                }
+            } else if (!isConversationActive) {
                 toggleBtn.disabled = false;
             }
             break;
@@ -213,10 +221,16 @@ async function startConversation() {
             });
         }
 
-        // Create audio context for RAW audio processing
-        // Note: Browser may use a different sample rate than requested
+        // Create audio context matching the MediaStream's native sample rate
+        // Firefox requires this - we'll resample to 16kHz later
+        const audioTrack = mediaStream.getAudioTracks()[0];
+        const settings = audioTrack.getSettings();
+        const nativeSampleRate = settings.sampleRate || 48000;
+
+        console.log('Native microphone sample rate:', nativeSampleRate);
+
         audioContext = new (window.AudioContext || window.webkitAudioContext)({
-            sampleRate: SAMPLE_RATE
+            sampleRate: nativeSampleRate  // Match native rate to avoid Firefox error
         });
 
         console.log('AudioContext created with sample rate:', audioContext.sampleRate);
@@ -225,19 +239,35 @@ async function startConversation() {
         const source = audioContext.createMediaStreamSource(mediaStream);
 
         // Create script processor for raw audio samples
-        // Buffer size: 4096 samples = ~256ms at 16kHz
+        // Buffer size: 4096 samples
         const processor = audioContext.createScriptProcessor(4096, 1, 1);
 
         processor.onaudioprocess = (e) => {
             if (!isRecording) return;
 
-            // Get raw PCM samples (Float32Array)
+            // Get raw PCM samples (Float32Array) at native sample rate
             const inputData = e.inputBuffer.getChannelData(0);
 
+            // Resample to 16kHz if needed
+            let resampledData;
+            if (audioContext.sampleRate !== SAMPLE_RATE) {
+                // Simple downsampling (for 48kHz -> 16kHz, keep every 3rd sample)
+                const ratio = audioContext.sampleRate / SAMPLE_RATE;
+                const outputLength = Math.floor(inputData.length / ratio);
+                resampledData = new Float32Array(outputLength);
+
+                for (let i = 0; i < outputLength; i++) {
+                    const srcIndex = Math.floor(i * ratio);
+                    resampledData[i] = inputData[srcIndex];
+                }
+            } else {
+                resampledData = inputData;
+            }
+
             // Convert Float32 to Int16 PCM
-            const pcmData = new Int16Array(inputData.length);
-            for (let i = 0; i < inputData.length; i++) {
-                const sample = Math.max(-1, Math.min(1, inputData[i]));
+            const pcmData = new Int16Array(resampledData.length);
+            for (let i = 0; i < resampledData.length; i++) {
+                const sample = Math.max(-1, Math.min(1, resampledData[i]));
                 pcmData[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
             }
 
