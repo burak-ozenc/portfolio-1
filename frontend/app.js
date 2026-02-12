@@ -20,6 +20,7 @@ const responseContent = document.getElementById('responseContent');
 
 // Conversation state
 let isConversationActive = false;
+let shouldProcessAudio = false;  // Only process audio when backend is ready to receive
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -73,14 +74,21 @@ function initializeWebSocket() {
         showError('Connection error. Please refresh the page.');
     };
 
-    ws.onclose = () => {
-        console.log('🔌 Disconnected from server');
+    ws.onclose = (event) => {
+        console.log('🔌 WebSocket closed');
+        console.log('   Code:', event.code);
+        console.log('   Reason:', event.reason);
+        console.log('   Was clean:', event.wasClean);
+        console.log('   isConversationActive:', isConversationActive);
+        console.log('   isRecording:', isRecording);
+
         updateStatus('disconnected', 'Disconnected');
         toggleBtn.disabled = true;
 
         // Try to reconnect after 3 seconds
         setTimeout(() => {
             if (ws.readyState === WebSocket.CLOSED) {
+                console.log('🔄 Attempting to reconnect...');
                 initializeWebSocket();
             }
         }, 3000);
@@ -122,7 +130,10 @@ function handleMessage(message) {
 }
 
 function handleStatusUpdate(status) {
-    console.log('Status:', status);
+    console.log('📥 Status update received:', status);
+    console.log('   isConversationActive:', isConversationActive);
+    console.log('   isRecording:', isRecording);
+    console.log('   WebSocket state:', ws.readyState);
 
     switch (status) {
         case 'ready':
@@ -134,26 +145,41 @@ function handleStatusUpdate(status) {
                 // Send start message to begin new turn
                 if (ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({ type: 'start' }));
+                    console.log('✅ Sent start message');
+                } else {
+                    console.error('❌ Cannot send start - WebSocket state:', ws.readyState);
                 }
-            } else if (!isConversationActive) {
-                toggleBtn.disabled = false;
+            } else {
+                console.log('⚠️ Not auto-restarting:');
+                console.log('   isConversationActive:', isConversationActive);
+                console.log('   isRecording:', isRecording);
+                if (!isConversationActive) {
+                    toggleBtn.disabled = false;
+                }
             }
             break;
 
         case 'listening':
             updateStatus('listening', 'Listening...');
+            shouldProcessAudio = true;  // Start processing audio
+            console.log('🎤 Audio processing enabled');
             break;
 
         case 'thinking':
             updateStatus('thinking', 'Thinking...');
+            shouldProcessAudio = false;  // Stop processing audio during LLM
+            console.log('🔇 Audio processing paused (thinking)');
             break;
 
         case 'speaking':
             updateStatus('speaking', 'Speaking...');
+            shouldProcessAudio = false;  // Stop processing audio during TTS
+            console.log('🔇 Audio processing paused (speaking)');
             break;
 
         case 'loading_tts':
             updateStatus('thinking', 'Loading voice model...');
+            shouldProcessAudio = false;
             break;
     }
 }
@@ -243,7 +269,7 @@ async function startConversation() {
         const processor = audioContext.createScriptProcessor(4096, 1, 1);
 
         processor.onaudioprocess = (e) => {
-            if (!isRecording) return;
+            if (!isRecording || !shouldProcessAudio) return;
 
             // Get raw PCM samples (Float32Array) at native sample rate
             const inputData = e.inputBuffer.getChannelData(0);
@@ -272,8 +298,10 @@ async function startConversation() {
             }
 
             // Send to server
-            if (ws.readyState === WebSocket.OPEN) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(pcmData.buffer);
+            } else if (ws && ws.readyState !== WebSocket.OPEN) {
+                console.warn('⚠️ Cannot send audio - WebSocket state:', ws.readyState);
             }
         };
 
@@ -283,6 +311,7 @@ async function startConversation() {
 
         isRecording = true;
         isConversationActive = true;
+        shouldProcessAudio = false;  // Will be enabled when backend sends "listening" status
 
         // Update UI
         toggleBtnText.textContent = 'End Conversation';
@@ -315,6 +344,9 @@ async function startConversation() {
 async function endConversation() {
     isRecording = false;
     isConversationActive = false;
+    shouldProcessAudio = false;
+
+    console.log('🛑 Ending conversation');
 
     if (audioContext) {
         await audioContext.close();
@@ -342,12 +374,16 @@ async function endConversation() {
 }
 
 async function playAudio(audioData) {
+    console.log('🔊 Playing audio...');
     try {
         // Create audio context
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        console.log('   AudioContext created for playback');
 
         // Decode audio buffer (expect 16-bit PCM from server)
         const arrayBuffer = await audioData.arrayBuffer();
+        console.log('   Audio buffer size:', arrayBuffer.byteLength, 'bytes');
+
         const int16Array = new Int16Array(arrayBuffer);
 
         // Convert to Float32Array
@@ -361,20 +397,27 @@ async function playAudio(audioData) {
         const audioBuffer = audioContext.createBuffer(1, float32Array.length, sampleRate);
         audioBuffer.getChannelData(0).set(float32Array);
 
+        const duration = audioBuffer.duration;
+        console.log('   Audio duration:', duration.toFixed(2), 'seconds');
+
         // Create source and play
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
 
         source.onended = () => {
+            console.log('✅ Audio playback finished');
             audioContext.close();
         };
 
         source.start(0);
+        console.log('🎵 Audio playback started');
 
     } catch (error) {
-        console.error('Error playing audio:', error);
-        showError('Could not play audio response.');
+        console.error('❌ Error playing audio:', error);
+        console.error('   Error name:', error.name);
+        console.error('   Error message:', error.message);
+        showError('Could not play audio response: ' + error.message);
     }
 }
 

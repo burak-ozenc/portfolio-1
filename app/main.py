@@ -236,8 +236,10 @@ class ConnectionManager:
                         "type": message_type,
                         "data": data
                     })
+                else:
+                    print(f"⚠️ Cannot send {message_type}: WebSocket state is {self.websocket.client_state.name}")
             except Exception as e:
-                print(f"Error sending message: {e}")
+                print(f"❌ Error sending {message_type}: {e}")
 
     async def send_audio(self, audio_bytes: bytes):
         """Send audio data to frontend"""
@@ -288,10 +290,14 @@ async def websocket_endpoint(websocket: WebSocket):
         # Main message loop
         while True:
             try:
-                # Check if websocket is still connected
-                if websocket.client_state.name != "CONNECTED":
-                    print("🔌 WebSocket no longer connected, breaking loop")
-                    break
+                # Check if websocket is still connected (but don't break on error)
+                try:
+                    if websocket.client_state.name != "CONNECTED":
+                        print("🔌 WebSocket no longer connected, breaking loop")
+                        break
+                except Exception as state_check_error:
+                    # If we can't check state, try to receive anyway
+                    print(f"⚠️ Could not check WebSocket state: {state_check_error}")
 
                 # Receive message with timeout
                 data = await asyncio.wait_for(
