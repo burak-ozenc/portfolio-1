@@ -28,7 +28,7 @@ class Config:
     DEEPGRAM_CHANNELS = 1
 
     # VAD settings
-    SILENCE_THRESHOLD = 1.0  # seconds of silence to consider speech ended
+    SILENCE_THRESHOLD = 1.5  # seconds of silence to consider speech ended
 
     # Paths
     BASE_DIR = Path(__file__).parent.parent

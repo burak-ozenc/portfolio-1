@@ -201,6 +201,15 @@
             transform: translateY(0);
         }
 
+        .btn-danger {
+            background: linear-gradient(135deg, #f56565 0%, #c53030 100%);
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: linear-gradient(135deg, #fc8181 0%, #e53e3e 100%);
+            box-shadow: 0 8px 20px rgba(245, 101, 101, 0.4);
+        }
+
         .btn-secondary {
             background: #e2e8f0;
             color: #4a5568;
@@ -296,14 +305,11 @@
     </div>
 
     <div class="controls">
-        <button class="btn btn-primary" id="talkBtn" disabled>
+        <button class="btn btn-primary" id="toggleBtn" disabled>
             <svg class="mic-icon" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clip-rule="evenodd"/>
             </svg>
-            <span id="talkBtnText">Start Talking</span>
-        </button>
-        <button class="btn btn-secondary" id="resetBtn">
-            Reset
+            <span id="toggleBtnText">Start Conversation</span>
         </button>
     </div>
 

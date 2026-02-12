@@ -6,12 +6,10 @@ let isRecording = false;
 
 // Audio configuration
 const SAMPLE_RATE = 16000;
-const CHUNK_INTERVAL = 100; // Send chunks every 100ms
 
 // DOM elements
-const talkBtn = document.getElementById('talkBtn');
-const resetBtn = document.getElementById('resetBtn');
-const talkBtnText = document.getElementById('talkBtnText');
+const toggleBtn = document.getElementById('toggleBtn');
+const toggleBtnText = document.getElementById('toggleBtnText');
 const statusIndicator = document.getElementById('statusIndicator');
 const statusText = document.getElementById('statusText');
 const errorMessage = document.getElementById('errorMessage');
@@ -19,6 +17,9 @@ const partialText = document.getElementById('partialText');
 const finalText = document.getElementById('finalText');
 const responseBox = document.getElementById('responseBox');
 const responseContent = document.getElementById('responseContent');
+
+// Conversation state
+let isConversationActive = false;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
@@ -32,8 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     initializeWebSocket();
 
-    talkBtn.addEventListener('click', toggleRecording);
-    resetBtn.addEventListener('click', resetConversation);
+    toggleBtn.addEventListener('click', toggleConversation);
 });
 
 function initializeWebSocket() {
@@ -47,7 +47,7 @@ function initializeWebSocket() {
     ws.onopen = () => {
         console.log('✅ Connected to server');
         updateStatus('ready', 'Ready to talk');
-        talkBtn.disabled = false;
+        toggleBtn.disabled = false;
 
         // Send keepalive ping every 30 seconds
         setInterval(() => {
@@ -76,7 +76,7 @@ function initializeWebSocket() {
     ws.onclose = () => {
         console.log('🔌 Disconnected from server');
         updateStatus('disconnected', 'Disconnected');
-        talkBtn.disabled = true;
+        toggleBtn.disabled = true;
 
         // Try to reconnect after 3 seconds
         setTimeout(() => {
@@ -126,21 +126,18 @@ function handleStatusUpdate(status) {
 
     switch (status) {
         case 'ready':
-            updateStatus('ready', 'Ready to talk');
-            talkBtn.disabled = false;
-            talkBtnText.textContent = 'Start Talking';
-            isRecording = false;
+            updateStatus('ready', 'Ready - Click to start');
+            if (!isConversationActive) {
+                toggleBtn.disabled = false;
+            }
             break;
 
         case 'listening':
             updateStatus('listening', 'Listening...');
-            talkBtnText.textContent = 'Stop Speaking';
-            talkBtn.disabled = false;
             break;
 
         case 'thinking':
             updateStatus('thinking', 'Thinking...');
-            talkBtn.disabled = true;
             break;
 
         case 'speaking':
@@ -154,7 +151,7 @@ function handleStatusUpdate(status) {
 }
 
 function handleTranscription(data) {
-    const { text, is_final, full_text } = data;
+    const { text, is_final } = data;
 
     if (is_final) {
         // Add to final text
@@ -175,17 +172,17 @@ function handleResponse(text) {
     responseBox.classList.add('visible');
 }
 
-async function toggleRecording() {
-    if (isRecording) {
-        await stopRecording();
+async function toggleConversation() {
+    if (isConversationActive) {
+        await endConversation();
     } else {
-        await startRecording();
+        await startConversation();
     }
 }
 
-async function startRecording() {
+async function startConversation() {
     try {
-        // Clear previous transcription
+        // Clear previous content
         partialText.textContent = '';
         finalText.textContent = '';
         responseBox.classList.remove('visible');
@@ -237,18 +234,25 @@ async function startRecording() {
         processor.connect(audioContext.destination);
 
         isRecording = true;
+        isConversationActive = true;
+
+        // Update UI
+        toggleBtnText.textContent = 'End Conversation';
+        toggleBtn.classList.add('btn-danger');
 
         // Send start message
         ws.send(JSON.stringify({ type: 'start' }));
 
     } catch (error) {
-        console.error('Error starting recording:', error);
+        console.error('Error starting conversation:', error);
         showError('Could not access microphone. Please check permissions.');
+        isConversationActive = false;
     }
 }
 
-async function stopRecording() {
+async function endConversation() {
     isRecording = false;
+    isConversationActive = false;
 
     if (audioContext) {
         await audioContext.close();
@@ -260,10 +264,19 @@ async function stopRecording() {
         mediaStream = null;
     }
 
-    // Send stop message
+    // Update UI
+    toggleBtnText.textContent = 'Start Conversation';
+    toggleBtn.classList.remove('btn-danger');
+
+    // Send reset to clear conversation history
     if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'stop' }));
+        ws.send(JSON.stringify({ type: 'reset' }));
     }
+
+    // Clear UI
+    partialText.textContent = '';
+    finalText.textContent = '';
+    responseBox.classList.remove('visible');
 }
 
 async function playAudio(audioData) {
@@ -303,23 +316,6 @@ async function playAudio(audioData) {
     }
 }
 
-function resetConversation() {
-    if (isRecording) {
-        stopRecording();
-    }
-
-    // Clear UI
-    partialText.textContent = '';
-    finalText.textContent = '';
-    responseBox.classList.remove('visible');
-    errorMessage.classList.remove('visible');
-
-    // Send reset message
-    if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'reset' }));
-    }
-}
-
 function updateStatus(status, text) {
     statusIndicator.className = 'status-indicator ' + status;
     statusText.textContent = text;
@@ -338,7 +334,7 @@ function showError(message) {
 // Cleanup on page unload
 window.addEventListener('beforeunload', async () => {
     if (isRecording) {
-        await stopRecording();
+        await endConversation();
     }
     if (ws) {
         ws.close();

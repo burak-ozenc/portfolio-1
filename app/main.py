@@ -105,6 +105,7 @@ class ConnectionManager:
     async def on_speech_end(self):
         """Called when speech ends (silence detected)"""
         import time
+        import re
         start_time = time.time()
 
         print(f"\n{'='*60}")
@@ -126,6 +127,24 @@ class ConnectionManager:
         self.is_processing = True
         user_message = self.current_transcription
 
+        # Simple deduplication: remove consecutive duplicate words
+        # "I I I was was was" -> "I was"
+        # "Great. Great. Great." -> "Great."
+        words = user_message.split()
+        deduped_words = []
+        prev_word = None
+        for word in words:
+            if word != prev_word:
+                deduped_words.append(word)
+                prev_word = word
+
+        cleaned_message = ' '.join(deduped_words)
+
+        if cleaned_message != user_message:
+            print(f"🧹 Cleaned duplicates:")
+            print(f"   Original: '{user_message}'")
+            print(f"   Cleaned:  '{cleaned_message}'")
+
         # Clear transcription for next turn
         self.current_transcription = ""
 
@@ -142,8 +161,8 @@ class ConnectionManager:
             # Get LLM response
             llm_start = time.time()
             print(f"\n🤖 CALLING LLM")
-            print(f"   Input: '{user_message}'")
-            llm_response = await self.llm_handler.generate_response(user_message)
+            print(f"   Input: '{cleaned_message}'")
+            llm_response = await self.llm_handler.generate_response(cleaned_message)
             llm_duration = time.time() - llm_start
             print(f"✅ LLM Response ({llm_duration:.2f}s): '{llm_response[:100]}...'")
 
