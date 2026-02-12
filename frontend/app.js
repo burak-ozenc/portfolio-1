@@ -182,26 +182,44 @@ async function toggleConversation() {
 
 async function startConversation() {
     try {
+        // Check if getUserMedia is supported
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            showError('Your browser does not support microphone access. Please use Chrome, Firefox, or Edge.');
+            return;
+        }
+
         // Clear previous content
         partialText.textContent = '';
         finalText.textContent = '';
         responseBox.classList.remove('visible');
 
-        // Request microphone access
-        mediaStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                channelCount: 1,
-                sampleRate: SAMPLE_RATE,
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true
-            }
-        });
+        // Request microphone access with fallback
+        try {
+            // Try with ideal constraints first
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    channelCount: 1,
+                    sampleRate: { ideal: SAMPLE_RATE },
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+        } catch (e) {
+            console.warn('Failed with ideal constraints, trying basic:', e);
+            // Fallback to basic audio
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: true
+            });
+        }
 
         // Create audio context for RAW audio processing
+        // Note: Browser may use a different sample rate than requested
         audioContext = new (window.AudioContext || window.webkitAudioContext)({
             sampleRate: SAMPLE_RATE
         });
+
+        console.log('AudioContext created with sample rate:', audioContext.sampleRate);
 
         // Create media stream source
         const source = audioContext.createMediaStreamSource(mediaStream);
@@ -245,7 +263,21 @@ async function startConversation() {
 
     } catch (error) {
         console.error('Error starting conversation:', error);
-        showError('Could not access microphone. Please check permissions.');
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+
+        let errorMsg = 'Could not access microphone. ';
+        if (error.name === 'NotAllowedError') {
+            errorMsg += 'Please allow microphone access in your browser.';
+        } else if (error.name === 'NotFoundError') {
+            errorMsg += 'No microphone found on this device.';
+        } else if (error.name === 'NotReadableError') {
+            errorMsg += 'Microphone is already in use by another application.';
+        } else {
+            errorMsg += 'Error: ' + error.message;
+        }
+
+        showError(errorMsg);
         isConversationActive = false;
     }
 }
