@@ -64,6 +64,16 @@ class ConnectionManager:
         self.audio_chunks_received = 0
         self.last_audio_log_time = time.time()
 
+        # Cancel any existing silence timer from previous turn
+        if self.stt_handler and self.stt_handler.silence_timer_task:
+            if not self.stt_handler.silence_timer_task.done():
+                print("🔄 Cancelling old silence timer from previous turn")
+                self.stt_handler.silence_timer_task.cancel()
+                try:
+                    await self.stt_handler.silence_timer_task
+                except asyncio.CancelledError:
+                    pass
+
         # Connect to Deepgram
         connect_start = time.time()
         await self.stt_handler.connect(
@@ -85,6 +95,11 @@ class ConnectionManager:
     async def on_transcription(self, text: str, is_final: bool):
         """Called when transcription received from Deepgram"""
         print(f"📨 Received transcription: '{text}' | is_final={is_final}")
+
+        # Ignore if already processing (prevents race conditions)
+        if self.is_processing:
+            print(f"⚠️ Ignoring transcription - already processing")
+            return
 
         if is_final:
             # Append to current transcription
@@ -113,10 +128,11 @@ class ConnectionManager:
         print(f"{'='*60}")
         print(f"   is_processing: {self.is_processing}")
         print(f"   transcription: '{self.current_transcription}'")
+        print(f"   STT handler state: {self.stt_handler.has_triggered_end if self.stt_handler else 'None'}")
         print(f"{'='*60}\n")
 
         if self.is_processing:
-            print("⚠️ Already processing, ignoring")
+            print("⚠️ Already processing, ignoring (this prevents double-trigger)")
             return
 
         if not self.current_transcription.strip():

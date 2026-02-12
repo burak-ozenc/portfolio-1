@@ -41,6 +41,16 @@ class STTHandler:
         self.final_callback = final_callback
         self.has_triggered_end = False  # Reset flag for new conversation
 
+        # Cancel any existing silence timer
+        if self.silence_timer_task and not self.silence_timer_task.done():
+            print("🔄 Cancelling existing silence timer before connect")
+            self.silence_timer_task.cancel()
+            try:
+                await self.silence_timer_task
+            except asyncio.CancelledError:
+                pass
+            self.silence_timer_task = None
+
         try:
             # Configure Deepgram client
             dg_config = DeepgramClientOptions(
@@ -170,8 +180,8 @@ class STTHandler:
                 print("⚠️ No final_callback set!")
 
         except asyncio.CancelledError:
-            # Timer was cancelled (more speech detected)
-            print(f"🔄 Silence timer cancelled (more speech detected)")
+            # Timer was cancelled (more speech detected or new conversation started)
+            print(f"🔄 Silence timer cancelled")
             # Don't raise - just exit gracefully
             pass
 
@@ -200,7 +210,13 @@ class STTHandler:
         try:
             # Cancel silence timer if running
             if self.silence_timer_task and not self.silence_timer_task.done():
+                print("🔄 Cancelling silence timer on close")
                 self.silence_timer_task.cancel()
+                try:
+                    await self.silence_timer_task
+                except asyncio.CancelledError:
+                    pass
+                self.silence_timer_task = None
 
             if self.dg_connection:
                 await self.dg_connection.finish()
