@@ -34,6 +34,11 @@ class ConnectionManager:
         self.audio_chunks_received = 0
         self.last_audio_log_time = 0
 
+        # Interruption handling
+        self.is_speaking = False
+        self.interrupt_requested = False
+        self.interruption_enabled = config.INTERRUPTION_ENABLED
+
     async def initialize(self, websocket: WebSocket):
         """Initialize handlers for a new connection"""
         self.websocket = websocket
@@ -117,6 +122,17 @@ class ConnectionManager:
             "full_text": self.current_transcription
         })
 
+    async def on_interruption_transcription(self, text: str, is_final: bool):
+        """Called when transcription received during AI speaking (for interruption detection)"""
+        if is_final and text.strip():
+            print(f"🛑 SPEECH DETECTED DURING AI PLAYBACK: '{text}'")
+            self.interrupt_requested = True
+
+    async def on_interruption_speech_end(self):
+        """Called when speech ends during AI playback (for interruption detection)"""
+        # This is also triggered by Deepgram VAD, but we rely on transcription for accuracy
+        pass
+
     async def on_speech_end(self):
         """Called when speech ends (silence detected)"""
         import time
@@ -182,6 +198,12 @@ class ConnectionManager:
             llm_duration = time.time() - llm_start
             print(f"✅ LLM Response ({llm_duration:.2f}s): '{llm_response[:100]}...'")
 
+            # Check for interrupt request during thinking phase
+            if self.interrupt_requested:
+                print("🛑 Interrupt detected during thinking phase - skipping TTS")
+                await self.handle_interruption()
+                return
+
             # Send LLM response to frontend
             await self.send_message("response", llm_response)
             print(f"⏰ [{time.time() - start_time:.1f}s] Response sent to frontend")
@@ -196,12 +218,63 @@ class ConnectionManager:
             tts_duration = time.time() - tts_start
             print(f"✅ TTS Generated ({tts_duration:.2f}s): {len(audio_bytes)} bytes")
 
+            # # Check if audio was actually generated
+            # if not audio_bytes or len(audio_bytes) == 0:
+            #     print("⚠️ No audio generated from TTS - returning to ready state")
+            #     await self.send_message("status", "ready")
+            #     return
+            # 
+            # # Check if audio is all zeros (silent)
+            # audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
+            # max_amplitude = np.max(np.abs(audio_array))
+            # mean_amplitude = np.mean(np.abs(audio_array))
+            # print(f"🎵 Audio analysis: samples={len(audio_array)}, max_amplitude={max_amplitude}, mean_amplitude={mean_amplitude:.1f}")
+            # 
+            # if max_amplitude == 0:
+            #     print("⚠️ WARNING: Audio is completely silent (all zeros)!")
+
+            # Reopen STT for interruption monitoring (only if enabled)
+            if self.interruption_enabled:
+                print(f"\n🎙️ REOPENING STT FOR INTERRUPTION MONITORING")
+                await self.stt_handler.connect(
+                    transcription_callback=self.on_interruption_transcription,
+                    final_callback=self.on_interruption_speech_end
+                )
+                print("✅ STT reconnected for monitoring")
+
             # Send audio to frontend
             send_start = time.time()
             print(f"\n📤 SENDING AUDIO TO FRONTEND")
+            self.is_speaking = True
             await self.send_audio(audio_bytes)
             send_duration = time.time() - send_start
             print(f"✅ Audio send completed in {send_duration:.2f}s")
+
+            # Monitor for interruptions during playback
+            # Calculate approximate audio duration (16-bit PCM, mono)
+            sample_rate = self.tts_handler.get_sample_rate()
+            audio_duration = len(audio_bytes) / (2 * sample_rate)  # 2 bytes per sample
+            print(f"🎵 Estimated audio duration: {audio_duration:.2f}s")
+            print(f"🔍 Monitoring for interruptions...")
+
+            elapsed = 0
+            check_interval = 0.1  # Check every 100ms
+            while elapsed < audio_duration:
+                if self.interrupt_requested:
+                    print(f"🛑 Interrupt detected at {elapsed:.2f}s / {audio_duration:.2f}s")
+                    await self.handle_interruption()
+                    return
+
+                await asyncio.sleep(check_interval)
+                elapsed += check_interval
+
+            print(f"✅ Audio playback completed without interruption")
+
+            # Close STT after playback
+            self.is_speaking = False
+            if self.stt_handler and self.interruption_enabled:
+                asyncio.create_task(self.stt_handler.close())
+                print("🔇 Closed STT monitoring")
 
             # Reset for next turn
             self.is_processing = False
@@ -229,6 +302,33 @@ class ConnectionManager:
             await self.send_message("error", str(e))
             self.is_processing = False
             await self.send_message("status", "ready")
+
+    async def handle_interruption(self):
+        """Handle user interruption during AI response"""
+        print(f"\n{'='*60}")
+        print(f"🛑 HANDLING INTERRUPTION")
+        print(f"{'='*60}\n")
+
+        # Clear state
+        self.is_speaking = False
+        self.interrupt_requested = False
+        self.is_processing = False
+        self.current_transcription = ""
+
+        # Close STT
+        if self.stt_handler:
+            asyncio.create_task(self.stt_handler.close())
+
+        # Notify frontend
+        await self.send_message("audio_stopped", "interrupted")
+        await self.send_message("status", "interrupting")
+
+        # Brief pause to let frontend settle
+        await asyncio.sleep(0.2)
+
+        # Restart conversation for new input
+        print("🔄 Restarting conversation after interruption")
+        await self.start_conversation()
 
     async def process_audio_chunk(self, audio_data: bytes):
         """Process incoming audio chunk"""
@@ -363,6 +463,14 @@ async def websocket_endpoint(websocket: WebSocket):
                         elif msg_type == "ping":
                             # Keepalive ping - respond with pong
                             await manager.send_message("pong", "ok")
+
+                        elif msg_type == "interrupt":
+                            # User interrupted the AI response
+                            print("🛑 Interrupt message received from frontend")
+                            if manager.is_speaking:
+                                manager.interrupt_requested = True
+                            else:
+                                print("⚠️ Interrupt ignored - not currently speaking")
 
                     except json.JSONDecodeError as e:
                         print(f"Invalid JSON: {e}")

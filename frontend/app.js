@@ -6,6 +6,16 @@ let isRecording = false;
 
 // Audio configuration
 const SAMPLE_RATE = 16000;
+let ttsSampleRate = 22050; // Default pyttsx3 sample rate, will be updated from server
+
+// Interruption handling
+let currentAudioSource = null;
+let currentAudioContext = null;
+let isAIPlaying = false;
+const INTERRUPTION_ENABLED = true;
+const INTERRUPT_VOLUME_THRESHOLD = 0.02;
+const INTERRUPT_SUSTAINED_FRAMES = 3;
+let interruptVolumeFrames = 0;
 
 // DOM elements
 const toggleBtn = document.getElementById('toggleBtn');
@@ -114,10 +124,24 @@ function handleMessage(message) {
         case 'audio_config':
             // Audio configuration received (sample rate)
             console.log('Audio config:', data);
+            if (data.sample_rate) {
+                ttsSampleRate = data.sample_rate;
+                console.log('TTS sample rate updated to:', ttsSampleRate);
+            }
             break;
 
         case 'pong':
             // Keepalive response - connection is alive
+            break;
+
+        case 'audio_stopped':
+            // Backend confirmed audio stopped
+            console.log('🛑 Audio stopped confirmation:', data);
+            break;
+
+        case 'interrupting':
+            // Backend is handling interruption
+            console.log('🛑 Interruption being handled by backend');
             break;
 
         case 'error':
@@ -269,10 +293,30 @@ async function startConversation() {
         const processor = audioContext.createScriptProcessor(4096, 1, 1);
 
         processor.onaudioprocess = (e) => {
-            if (!isRecording || !shouldProcessAudio) return;
-
             // Get raw PCM samples (Float32Array) at native sample rate
             const inputData = e.inputBuffer.getChannelData(0);
+
+            // ALWAYS calculate RMS volume for interruption detection
+            let sumSquares = 0;
+            for (let i = 0; i < inputData.length; i++) {
+                sumSquares += inputData[i] * inputData[i];
+            }
+            const rms = Math.sqrt(sumSquares / inputData.length);
+
+            // Check for interruption during AI playback
+            if (INTERRUPTION_ENABLED && isAIPlaying && rms > INTERRUPT_VOLUME_THRESHOLD) {
+                interruptVolumeFrames++;
+                if (interruptVolumeFrames >= INTERRUPT_SUSTAINED_FRAMES) {
+                    console.log(`🛑 INTERRUPTION DETECTED (RMS: ${rms.toFixed(4)}, threshold: ${INTERRUPT_VOLUME_THRESHOLD})`);
+                    handleInterruption();
+                    interruptVolumeFrames = 0;
+                }
+            } else {
+                interruptVolumeFrames = 0;
+            }
+
+            // Only send to backend when listening
+            if (!isRecording || !shouldProcessAudio) return;
 
             // Resample to 16kHz if needed
             let resampledData;
@@ -376,15 +420,39 @@ async function endConversation() {
 async function playAudio(audioData) {
     console.log('🔊 Playing audio...');
     try {
+        // Stop any existing audio first
+        stopCurrentAudio();
+
         // Create audio context
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        currentAudioContext = new (window.AudioContext || window.webkitAudioContext)();
         console.log('   AudioContext created for playback');
 
         // Decode audio buffer (expect 16-bit PCM from server)
         const arrayBuffer = await audioData.arrayBuffer();
         console.log('   Audio buffer size:', arrayBuffer.byteLength, 'bytes');
 
+        // if (arrayBuffer.byteLength === 0) {
+        //     console.error('❌ Audio buffer is empty!');
+        //     return;
+        // }
+
         const int16Array = new Int16Array(arrayBuffer);
+        console.log('   Int16 samples:', int16Array.length);
+
+        // // Check amplitude
+        // let maxAmplitude = 0;
+        // let sumAmplitude = 0;
+        // for (let i = 0; i < int16Array.length; i++) {
+        //     const absValue = Math.abs(int16Array[i]);
+        //     if (absValue > maxAmplitude) maxAmplitude = absValue;
+        //     sumAmplitude += absValue;
+        // }
+        // const meanAmplitude = sumAmplitude / int16Array.length;
+        // console.log('   Audio amplitude: max =', maxAmplitude, ', mean =', meanAmplitude.toFixed(1));
+
+        // if (maxAmplitude === 0) {
+        //     console.warn('⚠️ Audio is completely silent (all zeros)!');
+        // }
 
         // Convert to Float32Array
         const float32Array = new Float32Array(int16Array.length);
@@ -392,25 +460,32 @@ async function playAudio(audioData) {
             float32Array[i] = int16Array[i] / 32768.0;
         }
 
-        // Create audio buffer (assume Pocket TTS sample rate is 24kHz)
-        const sampleRate = 24000; // Pocket TTS default
-        const audioBuffer = audioContext.createBuffer(1, float32Array.length, sampleRate);
+        // Create audio buffer using TTS sample rate from server
+        console.log('   Creating AudioBuffer with sample rate:', ttsSampleRate, 'Hz');
+        const audioBuffer = currentAudioContext.createBuffer(1, float32Array.length, ttsSampleRate);
         audioBuffer.getChannelData(0).set(float32Array);
 
         const duration = audioBuffer.duration;
         console.log('   Audio duration:', duration.toFixed(2), 'seconds');
 
         // Create source and play
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioContext.destination);
+        currentAudioSource = currentAudioContext.createBufferSource();
+        currentAudioSource.buffer = audioBuffer;
+        currentAudioSource.connect(currentAudioContext.destination);
 
-        source.onended = () => {
+        isAIPlaying = true;
+
+        currentAudioSource.onended = () => {
             console.log('✅ Audio playback finished');
-            audioContext.close();
+            isAIPlaying = false;
+            if (currentAudioContext) {
+                currentAudioContext.close();
+                currentAudioContext = null;
+            }
+            currentAudioSource = null;
         };
 
-        source.start(0);
+        currentAudioSource.start(0);
         console.log('🎵 Audio playback started');
 
     } catch (error) {
@@ -418,6 +493,7 @@ async function playAudio(audioData) {
         console.error('   Error name:', error.name);
         console.error('   Error message:', error.message);
         showError('Could not play audio response: ' + error.message);
+        isAIPlaying = false;
     }
 }
 
@@ -434,6 +510,48 @@ function showError(message) {
     setTimeout(() => {
         errorMessage.classList.remove('visible');
     }, 5000);
+}
+
+function stopCurrentAudio() {
+    console.log('🛑 Stopping current audio playback');
+
+    if (currentAudioSource) {
+        try {
+            currentAudioSource.stop();
+        } catch (e) {
+            // Already stopped or not started
+            console.log('   Note: Audio source already stopped');
+        }
+        currentAudioSource = null;
+    }
+
+    if (currentAudioContext) {
+        try {
+            currentAudioContext.close();
+        } catch (e) {
+            console.log('   Note: Audio context already closed');
+        }
+        currentAudioContext = null;
+    }
+
+    isAIPlaying = false;
+    interruptVolumeFrames = 0;
+}
+
+function handleInterruption() {
+    console.log('🛑 HANDLING INTERRUPTION');
+
+    // Stop audio immediately (no round-trip to backend)
+    stopCurrentAudio();
+
+    // Notify backend
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'interrupt' }));
+        console.log('📤 Sent interrupt message to backend');
+    }
+
+    // Update UI
+    updateStatus('listening', 'Listening... (interrupted)');
 }
 
 // Cleanup on page unload

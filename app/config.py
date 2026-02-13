@@ -28,7 +28,12 @@ class Config:
     DEEPGRAM_CHANNELS = 1
 
     # VAD settings
-    SILENCE_THRESHOLD = 1.5  # seconds of silence to consider speech ended
+    SILENCE_THRESHOLD = 2.3  # seconds of silence to consider speech ended
+
+    # Interruption settings
+    INTERRUPTION_ENABLED = True
+    INTERRUPT_VOLUME_THRESHOLD = 0.2  # RMS threshold for speech detection
+    INTERRUPT_SUSTAINED_FRAMES = 5  # Frames before trigger (~250ms)
 
     # Paths
     BASE_DIR = Path(__file__).parent.parent
