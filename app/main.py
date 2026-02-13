@@ -79,13 +79,20 @@ class ConnectionManager:
                 except asyncio.CancelledError:
                     pass
 
-        # Connect to Deepgram
-        connect_start = time.time()
-        await self.stt_handler.connect(
-            transcription_callback=self.on_transcription,
-            final_callback=self.on_speech_end
-        )
-        connect_duration = time.time() - connect_start
+        # Only connect if not already connected (keep connection alive across turns)
+        if not self.stt_handler.is_connected:
+            connect_start = time.time()
+            print("🔌 Connecting to Deepgram...")
+            await self.stt_handler.connect(
+                transcription_callback=self.on_transcription,
+                final_callback=self.on_speech_end
+            )
+            connect_duration = time.time() - connect_start
+            print(f"✅ Connected in {connect_duration:.2f}s")
+        else:
+            print("✅ Reusing existing Deepgram connection")
+            # Reset the has_triggered_end flag for new turn
+            self.stt_handler.has_triggered_end = False
 
         await self.send_message("status", "listening")
 
@@ -93,15 +100,21 @@ class ConnectionManager:
         print(f"\n{'='*60}")
         print(f"✅ CONVERSATION STARTED")
         print(f"{'='*60}")
-        print(f"   Connection Time: {connect_duration:.2f}s")
         print(f"   Total Time: {total_duration:.2f}s")
         print(f"{'='*60}\n")
 
     async def on_transcription(self, text: str, is_final: bool):
         """Called when transcription received from Deepgram"""
-        print(f"📨 Received transcription: '{text}' | is_final={is_final}")
+        print(f"📨 Received transcription: '{text}' | is_final={is_final} | is_speaking={self.is_speaking}")
 
-        # Ignore if already processing (prevents race conditions)
+        # If AI is speaking, treat any speech as interruption
+        if self.is_speaking:
+            if is_final and text.strip():
+                print(f"🛑 SPEECH DETECTED DURING AI PLAYBACK: '{text}'")
+                self.interrupt_requested = True
+            return
+
+        # Normal listening mode - ignore if already processing
         if self.is_processing:
             print(f"⚠️ Ignoring transcription - already processing")
             return
@@ -121,17 +134,6 @@ class ConnectionManager:
             "is_final": is_final,
             "full_text": self.current_transcription
         })
-
-    async def on_interruption_transcription(self, text: str, is_final: bool):
-        """Called when transcription received during AI speaking (for interruption detection)"""
-        if is_final and text.strip():
-            print(f"🛑 SPEECH DETECTED DURING AI PLAYBACK: '{text}'")
-            self.interrupt_requested = True
-
-    async def on_interruption_speech_end(self):
-        """Called when speech ends during AI playback (for interruption detection)"""
-        # This is also triggered by Deepgram VAD, but we rely on transcription for accuracy
-        pass
 
     async def on_speech_end(self):
         """Called when speech ends (silence detected)"""
@@ -181,10 +183,8 @@ class ConnectionManager:
         self.current_transcription = ""
 
         try:
-            # Close STT connection (but don't await - let it close in background)
-            print("⏰ [0.0s] Closing STT connection...")
-            if self.stt_handler:
-                asyncio.create_task(self.stt_handler.close())
+            # Keep STT connection open (will reuse for interruption monitoring)
+            print("⏰ [0.0s] Keeping STT connection open...")
 
             # Send thinking status
             await self.send_message("status", "thinking")
@@ -208,6 +208,10 @@ class ConnectionManager:
             await self.send_message("response", llm_response)
             print(f"⏰ [{time.time() - start_time:.1f}s] Response sent to frontend")
 
+            # STT remains open for interruption monitoring (no need to reconnect)
+            # is_speaking flag will be set to True, so on_transcription handles interrupts
+            print(f"🎙️ STT already listening for interruptions (continuous connection)")
+
             # Generate TTS audio
             await self.send_message("status", "speaking")
             print(f"⏰ [{time.time() - start_time:.1f}s] Status: speaking")
@@ -217,30 +221,6 @@ class ConnectionManager:
             audio_bytes = await self.tts_handler.synthesize(llm_response)
             tts_duration = time.time() - tts_start
             print(f"✅ TTS Generated ({tts_duration:.2f}s): {len(audio_bytes)} bytes")
-
-            # # Check if audio was actually generated
-            # if not audio_bytes or len(audio_bytes) == 0:
-            #     print("⚠️ No audio generated from TTS - returning to ready state")
-            #     await self.send_message("status", "ready")
-            #     return
-            # 
-            # # Check if audio is all zeros (silent)
-            # audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
-            # max_amplitude = np.max(np.abs(audio_array))
-            # mean_amplitude = np.mean(np.abs(audio_array))
-            # print(f"🎵 Audio analysis: samples={len(audio_array)}, max_amplitude={max_amplitude}, mean_amplitude={mean_amplitude:.1f}")
-            # 
-            # if max_amplitude == 0:
-            #     print("⚠️ WARNING: Audio is completely silent (all zeros)!")
-
-            # Reopen STT for interruption monitoring (only if enabled)
-            if self.interruption_enabled:
-                print(f"\n🎙️ REOPENING STT FOR INTERRUPTION MONITORING")
-                await self.stt_handler.connect(
-                    transcription_callback=self.on_interruption_transcription,
-                    final_callback=self.on_interruption_speech_end
-                )
-                print("✅ STT reconnected for monitoring")
 
             # Send audio to frontend
             send_start = time.time()
@@ -270,11 +250,9 @@ class ConnectionManager:
 
             print(f"✅ Audio playback completed without interruption")
 
-            # Close STT after playback
+            # Keep STT open for next turn (just mark as not speaking)
             self.is_speaking = False
-            if self.stt_handler and self.interruption_enabled:
-                asyncio.create_task(self.stt_handler.close())
-                print("🔇 Closed STT monitoring")
+            print("🎙️ STT remains open for next turn")
 
             # Reset for next turn
             self.is_processing = False
@@ -315,20 +293,24 @@ class ConnectionManager:
         self.is_processing = False
         self.current_transcription = ""
 
-        # Close STT
+        # Keep STT open - just reset its state for new turn
         if self.stt_handler:
-            asyncio.create_task(self.stt_handler.close())
+            self.stt_handler.has_triggered_end = False
+            # Cancel any running silence timer
+            if self.stt_handler.silence_timer_task and not self.stt_handler.silence_timer_task.done():
+                self.stt_handler.silence_timer_task.cancel()
+                try:
+                    await self.stt_handler.silence_timer_task
+                except asyncio.CancelledError:
+                    pass
+            print("🎙️ STT state reset, keeping connection open")
 
         # Notify frontend
         await self.send_message("audio_stopped", "interrupted")
-        await self.send_message("status", "interrupting")
 
-        # Brief pause to let frontend settle
-        await asyncio.sleep(0.2)
-
-        # Restart conversation for new input
-        print("🔄 Restarting conversation after interruption")
-        await self.start_conversation()
+        # Go back to listening state immediately (no reconnection delay!)
+        await self.send_message("status", "listening")
+        print("✅ Ready for new input immediately (no reconnection needed)")
 
     async def process_audio_chunk(self, audio_data: bytes):
         """Process incoming audio chunk"""

@@ -14,7 +14,7 @@ let currentAudioContext = null;
 let isAIPlaying = false;
 const INTERRUPTION_ENABLED = true;
 const INTERRUPT_VOLUME_THRESHOLD = 0.02;
-const INTERRUPT_SUSTAINED_FRAMES = 3;
+const INTERRUPT_SUSTAINED_FRAMES = 2;
 let interruptVolumeFrames = 0;
 
 // DOM elements
@@ -431,28 +431,7 @@ async function playAudio(audioData) {
         const arrayBuffer = await audioData.arrayBuffer();
         console.log('   Audio buffer size:', arrayBuffer.byteLength, 'bytes');
 
-        // if (arrayBuffer.byteLength === 0) {
-        //     console.error('❌ Audio buffer is empty!');
-        //     return;
-        // }
-
         const int16Array = new Int16Array(arrayBuffer);
-        console.log('   Int16 samples:', int16Array.length);
-
-        // // Check amplitude
-        // let maxAmplitude = 0;
-        // let sumAmplitude = 0;
-        // for (let i = 0; i < int16Array.length; i++) {
-        //     const absValue = Math.abs(int16Array[i]);
-        //     if (absValue > maxAmplitude) maxAmplitude = absValue;
-        //     sumAmplitude += absValue;
-        // }
-        // const meanAmplitude = sumAmplitude / int16Array.length;
-        // console.log('   Audio amplitude: max =', maxAmplitude, ', mean =', meanAmplitude.toFixed(1));
-
-        // if (maxAmplitude === 0) {
-        //     console.warn('⚠️ Audio is completely silent (all zeros)!');
-        // }
 
         // Convert to Float32Array
         const float32Array = new Float32Array(int16Array.length);
@@ -461,7 +440,6 @@ async function playAudio(audioData) {
         }
 
         // Create audio buffer using TTS sample rate from server
-        console.log('   Creating AudioBuffer with sample rate:', ttsSampleRate, 'Hz');
         const audioBuffer = currentAudioContext.createBuffer(1, float32Array.length, ttsSampleRate);
         audioBuffer.getChannelData(0).set(float32Array);
 
