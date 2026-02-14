@@ -1,5 +1,6 @@
-﻿from pocket_tts import TTSModel
+from pocket_tts import TTSModel
 import numpy as np
+from pathlib import Path
 from app.config import config
 
 class TTSHandler:
@@ -8,8 +9,10 @@ class TTSHandler:
         self.tts_model = TTSModel.load_model()
 
         # Load voice state
+        script_dir = Path(__file__).parent
+        voice_abs = (script_dir / config.TTS_VOICE).absolute()
         self.voice_state = self.tts_model.get_state_for_audio_prompt(
-            config.TTS_VOICE
+            voice_abs,
         )
         print("TTS model loaded successfully")
 
@@ -31,6 +34,18 @@ class TTSHandler:
         except Exception as e:
             print(f"TTS Error: {e}")
             return b""
+    async def synthesize_stream(self, text: str) -> [bytes]:
+        """Synthesize text to speech audio stream"""
+        try:
+            # Generate audio stream
+            for chunk in self.tts_model.generate_audio_stream(self.voice_state, text):
+                audio_np = np.clip(chunk.numpy(), -1.0, 1.0) 
+                audio_int16 = (audio_np * 32767).astype(np.int16)
+                yield audio_int16.tobytes()
+            
+        except Exception as e:
+            print(f"TTS Error: {e}")
+            return
 
     def get_sample_rate(self) -> int:
         """Get the sample rate of the TTS model"""

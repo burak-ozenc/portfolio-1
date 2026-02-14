@@ -16,9 +16,16 @@ config.validate()
 # Initialize FastAPI
 app = FastAPI(title="Voice Portfolio Assistant")
 
-# Mount static files for frontend
-frontend_dir = Path(__file__).parent.parent / "frontend"
-app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
+# Frontend directory (frontend-2 built files)
+frontend_2_dir = Path(__file__).parent.parent / "frontend-2" / "dist"
+
+# Check if frontend-2 built files exist
+if frontend_2_dir.exists():
+    # Serve frontend-2 static assets
+    app.mount("/assets", StaticFiles(directory=str(frontend_2_dir / "assets")), name="assets")
+    print("✅ Frontend-2 static files mounted at /assets")
+else:
+    print("⚠️ Frontend-2 not found - run 'npm run build' in frontend-2 directory")
 
 
 class ConnectionManager:
@@ -198,11 +205,11 @@ class ConnectionManager:
             llm_duration = time.time() - llm_start
             print(f"✅ LLM Response ({llm_duration:.2f}s): '{llm_response[:100]}...'")
 
+            print("Skip interrupt request on speech end")
             # Check for interrupt request during thinking phase
             if self.interrupt_requested:
                 print("🛑 Interrupt detected during thinking phase - skipping TTS")
                 await self.handle_interruption()
-                return
 
             # Send LLM response to frontend
             await self.send_message("response", llm_response)
@@ -218,36 +225,17 @@ class ConnectionManager:
 
             tts_start = time.time()
             print(f"\n🔊 GENERATING TTS ({len(llm_response)} chars)")
-            audio_bytes = await self.tts_handler.synthesize(llm_response)
+            audio_stream = self.tts_handler.synthesize_stream(llm_response)
             tts_duration = time.time() - tts_start
-            print(f"✅ TTS Generated ({tts_duration:.2f}s): {len(audio_bytes)} bytes")
+            print(f"✅ TTS Generated ({tts_duration:.2f}s)")
 
             # Send audio to frontend
             send_start = time.time()
             print(f"\n📤 SENDING AUDIO TO FRONTEND")
             self.is_speaking = True
-            await self.send_audio(audio_bytes)
+            await self.send_audio(audio_stream)
             send_duration = time.time() - send_start
             print(f"✅ Audio send completed in {send_duration:.2f}s")
-
-            # Monitor for interruptions during playback
-            # Calculate approximate audio duration (16-bit PCM, mono)
-            sample_rate = self.tts_handler.get_sample_rate()
-            audio_duration = len(audio_bytes) / (2 * sample_rate)  # 2 bytes per sample
-            print(f"🎵 Estimated audio duration: {audio_duration:.2f}s")
-            print(f"🔍 Monitoring for interruptions...")
-
-            elapsed = 0
-            check_interval = 0.1  # Check every 100ms
-            while elapsed < audio_duration:
-                if self.interrupt_requested:
-                    print(f"🛑 Interrupt detected at {elapsed:.2f}s / {audio_duration:.2f}s")
-                    await self.handle_interruption()
-                    return
-
-                await asyncio.sleep(check_interval)
-                elapsed += check_interval
-
             print(f"✅ Audio playback completed without interruption")
 
             # Keep STT open for next turn (just mark as not speaking)
@@ -261,6 +249,11 @@ class ConnectionManager:
             print(f"\n📨 SENDING READY STATUS")
             await self.send_message("status", "ready")
             print(f"✅ Ready status sent")
+
+            # Reset STT handler flag for next turn
+            if self.stt_handler:
+                self.stt_handler.has_triggered_end = False
+                print(f"✅ STT handler reset for next turn")
 
             total_duration = time.time() - start_time
             print(f"\n{'='*60}")
@@ -305,6 +298,10 @@ class ConnectionManager:
                     pass
             print("🎙️ STT state reset, keeping connection open")
 
+
+        # send signal to stop stream
+        await self.websocket.send_json({ "type": "audio_config", "stream_status": "stop_stream"})
+        
         # Notify frontend
         await self.send_message("audio_stopped", "interrupted")
 
@@ -347,7 +344,7 @@ class ConnectionManager:
             except Exception as e:
                 print(f"❌ Error sending {message_type}: {e}")
 
-    async def send_audio(self, audio_bytes: bytes):
+    async def send_audio(self, audio_bytes: [bytes]):
         """Send audio data to frontend"""
         if not self.websocket:
             print(f"⚠️ Cannot send audio: No websocket")
@@ -361,19 +358,27 @@ class ConnectionManager:
             if ws_state != "CONNECTED":
                 print(f"⚠️ Cannot send audio: WebSocket state is {ws_state}")
                 return
-
             # Send sample rate first
             await self.websocket.send_json({
                 "type": "audio_config",
                 "data": {
                     "sample_rate": self.tts_handler.get_sample_rate()
-                }
+                },
+                "stream_status": "begin_stream"
             })
             print(f"✅ Sent audio config")
-
-            # Send audio data
-            await self.websocket.send_bytes(audio_bytes)
-            print(f"✅ Sent audio bytes: {len(audio_bytes)} bytes")
+           
+            print(f"🔍 Monitoring for interruptions...")                
+            # stream audio data 
+            async for pcm_chunk in audio_bytes:
+                await asyncio.sleep(0)
+                await self.websocket.send_bytes(pcm_chunk)
+            
+            # send signal to stop stream
+            await self.websocket.send_json({
+                "type": "audio_config",
+                "stream_status": "stop_stream"
+            })
 
         except Exception as e:
             print(f"❌ Error sending audio: {e}")
@@ -388,8 +393,11 @@ class ConnectionManager:
 
 @app.get("/")
 async def root():
-    """Serve frontend"""
-    return FileResponse(frontend_dir / "index.html")
+    """Serve frontend-2 (React UI)"""
+    if frontend_2_dir.exists():
+        return FileResponse(frontend_2_dir / "index.html")
+    else:
+        return {"error": "Frontend not found. Run 'npm run build' in frontend-2 directory."}
 
 
 @app.websocket("/ws")
@@ -449,9 +457,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         elif msg_type == "interrupt":
                             # User interrupted the AI response
                             print("🛑 Interrupt message received from frontend")
+                            print("Will check if it is actually an interrupt")
                             if manager.is_speaking:
                                 manager.interrupt_requested = True
                             else:
+                                print("Interrupt Requested check")
+                                if manager.interrupt_requested:
+                                    await manager.handle_interruption()
                                 print("⚠️ Interrupt ignored - not currently speaking")
 
                     except json.JSONDecodeError as e:
