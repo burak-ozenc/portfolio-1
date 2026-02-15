@@ -15,7 +15,7 @@ class Config:
     PORT = 7860
 
     # Model settings
-    GROQ_MODEL = "openai/gpt-oss-120b"
+    GROQ_MODEL =  "llama-3.1-8b-instant" #"openai/gpt-oss-120b"
 
     # TTS settings
     TTS_VOICE = "https://huggingface.co/datasets/burrak/voice-sample/resolve/main/burak.wav"  # Pocket TTS voice (will be replaced with custom voice later)

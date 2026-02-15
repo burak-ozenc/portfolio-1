@@ -284,6 +284,20 @@ function App() {
     }, [isPlaying, userSpeaking, sendMessage, stopPlayback, clearQueue]);
 
     /**
+     * Manual interruption via UI button
+     */
+    const handleManualInterrupt = useCallback(() => {
+        if (!isPlaying) return;
+
+        console.log('🛑 Manual interruption triggered');
+        hasInterruptedRef.current = true;
+        sendMessage({ type: 'interrupt' });
+        stopPlayback();
+        clearQueue();
+        isStreamingRef.current = false;
+    }, [isPlaying, sendMessage, stopPlayback, clearQueue]);
+
+    /**
      * Update audio level for visualization
      */
     useEffect(() => {
@@ -346,6 +360,35 @@ function App() {
 
             {/* Contact Modal */}
             <Contact isOpen={isContactOpen} onClose={() => setIsContactOpen(false)} />
+
+            {/* Interrupt Button - Shows only when AI is speaking */}
+            {isPlaying && (
+                <button
+                    onClick={handleManualInterrupt}
+                    className="fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-red-600 hover:bg-red-700 text-white font-mono text-sm px-6 py-3 rounded-full shadow-lg transition-all flex items-center gap-2 z-30 animate-pulse"
+                >
+                    <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                    >
+                        <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                        <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"
+                        />
+                    </svg>
+                    Stop Speaking
+                </button>
+            )}
 
             {/* Connection Status */}
             <div className="fixed top-4 right-4 text-xs font-mono">

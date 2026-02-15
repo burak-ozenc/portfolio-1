@@ -29,7 +29,7 @@ class LLMHandler:
             model=config.GROQ_MODEL,
             messages=messages,
             temperature=0.7,
-            max_tokens=2048
+            max_tokens=1024
         )
         print("Check all response", response)
         # Extract response text

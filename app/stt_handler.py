@@ -22,6 +22,10 @@ class STTHandler:
         self.last_speech_time = None
         self.silence_timer_task = None
         self.has_triggered_end = False  # Prevent multiple triggers
+        self.keepalive_task = None  # Keepalive task during idle periods
+        self.is_reconnecting = False  # Prevent multiple reconnection attempts
+        self.is_manual_close = False  # Flag to distinguish manual vs unexpected closes
+        self.silence_sender_task = None  # Task that sends silence during speaking
 
         print("STT Handler initialized")
 
@@ -32,7 +36,7 @@ class STTHandler:
     ):
         """
         Connect to Deepgram streaming API
-        
+
         Args:
             transcription_callback: Called with (text, is_final) for each transcription
             final_callback: Called with full text when speech ends
@@ -40,6 +44,7 @@ class STTHandler:
         self.transcription_callback = transcription_callback
         self.final_callback = final_callback
         self.has_triggered_end = False  # Reset flag for new conversation
+        self.is_manual_close = False  # Reset manual close flag
 
         # Cancel any existing silence timer
         if self.silence_timer_task and not self.silence_timer_task.done():
@@ -186,14 +191,25 @@ class STTHandler:
             pass
 
     async def _on_error(self, *args, **kwargs):
-        """Called on error"""
+        """Called on error - trigger auto-reconnect"""
         error = kwargs.get('error') or (args[1] if len(args) > 1 else args[0])
         print(f"❌ Deepgram error: {error}")
 
+        # Trigger auto-reconnect
+        if not self.is_reconnecting:
+            print("🔄 Triggering auto-reconnect due to error...")
+            asyncio.create_task(self._auto_reconnect())
+
     async def _on_close(self, *args, **kwargs):
-        """Called when connection closes"""
+        """Called when connection closes - trigger auto-reconnect if unexpected"""
+        was_connected = self.is_connected
         self.is_connected = False
         print("🔌 Deepgram WebSocket closed")
+
+        # Only auto-reconnect if this was NOT a manual close
+        if was_connected and not self.is_reconnecting and not self.is_manual_close and self.transcription_callback:
+            print("🔄 Unexpected closure - triggering auto-reconnect...")
+            asyncio.create_task(self._auto_reconnect())
 
     async def send_audio(self, audio_data: bytes):
         """Send audio chunk to Deepgram"""
@@ -205,9 +221,144 @@ class STTHandler:
         except Exception as e:
             print(f"Error sending audio: {e}")
 
-    async def close(self):
-        """Close connection to Deepgram"""
+    async def send_keepalive(self):
+        """Send keepalive message to Deepgram to prevent timeout"""
+        if not self.is_connected or not self.dg_connection:
+            return
+
         try:
+            await self.dg_connection.keep_alive()
+        except Exception as e:
+            print(f"⚠️ Error sending keepalive: {e}")
+
+    async def start_keepalive_task(self):
+        """Start periodic keepalive task to prevent timeout during idle periods"""
+        if self.keepalive_task and not self.keepalive_task.done():
+            return  # Already running
+
+        print("🔄 Starting keepalive task (5s interval)")
+        self.keepalive_task = asyncio.create_task(self._keepalive_loop())
+
+    async def stop_keepalive_task(self):
+        """Stop the keepalive task"""
+        if self.keepalive_task and not self.keepalive_task.done():
+            print("🛑 Stopping keepalive task")
+            self.keepalive_task.cancel()
+            try:
+                await self.keepalive_task
+            except asyncio.CancelledError:
+                pass
+            self.keepalive_task = None
+
+    async def _keepalive_loop(self):
+        """Periodically send keepalive messages"""
+        try:
+            while True:
+                await asyncio.sleep(5)  # Send keepalive every 5 seconds
+                if self.is_connected:
+                    await self.send_keepalive()
+        except asyncio.CancelledError:
+            print("✅ Keepalive task cancelled")
+        except Exception as e:
+            print(f"❌ Keepalive loop error: {e}")
+
+    async def start_silence_sender(self):
+        """Start sending silence audio to Deepgram to prevent timeout"""
+        if self.silence_sender_task and not self.silence_sender_task.done():
+            return  # Already running
+
+        print("🔇 Starting silence sender (2s interval)")
+        self.silence_sender_task = asyncio.create_task(self._silence_sender_loop())
+
+    async def stop_silence_sender(self):
+        """Stop the silence sender task"""
+        if self.silence_sender_task and not self.silence_sender_task.done():
+            print("🛑 Stopping silence sender")
+            self.silence_sender_task.cancel()
+            try:
+                await self.silence_sender_task
+            except asyncio.CancelledError:
+                pass
+            self.silence_sender_task = None
+
+    async def _silence_sender_loop(self):
+        """Periodically send silence audio frames to keep connection alive"""
+        import numpy as np
+
+        try:
+            # Generate 100ms of silence at 16kHz
+            sample_rate = config.DEEPGRAM_SAMPLE_RATE
+            duration_ms = 100
+            num_samples = int(sample_rate * duration_ms / 1000)
+            silence = np.zeros(num_samples, dtype=np.int16)
+            silence_bytes = silence.tobytes()
+
+            while True:
+                await asyncio.sleep(2)  # Send silence every 2 seconds
+                if self.is_connected and self.dg_connection:
+                    try:
+                        await self.dg_connection.send(silence_bytes)
+                        print("🔇 Sent silence to Deepgram")
+                    except Exception as e:
+                        print(f"⚠️ Error sending silence: {e}")
+                        break
+
+        except asyncio.CancelledError:
+            print("✅ Silence sender task cancelled")
+        except Exception as e:
+            print(f"❌ Silence sender loop error: {e}")
+
+    async def _auto_reconnect(self):
+        """Automatically reconnect to Deepgram after connection loss"""
+        if self.is_reconnecting:
+            return  # Already reconnecting
+
+        self.is_reconnecting = True
+        max_retries = 3
+        retry_delay = 2  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                print(f"🔄 Reconnect attempt {attempt + 1}/{max_retries}...")
+
+                # Close existing connection if any
+                if self.dg_connection:
+                    try:
+                        await self.dg_connection.finish()
+                    except:
+                        pass
+
+                # Wait before retrying
+                if attempt > 0:
+                    await asyncio.sleep(retry_delay * attempt)
+
+                # Reconnect with same callbacks
+                await self.connect(
+                    transcription_callback=self.transcription_callback,
+                    final_callback=self.final_callback
+                )
+
+                print(f"✅ Successfully reconnected to Deepgram")
+                self.is_reconnecting = False
+                return
+
+            except Exception as e:
+                print(f"❌ Reconnect attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    print(f"❌ All reconnect attempts failed")
+
+        self.is_reconnecting = False
+
+    async def close(self):
+        """Close connection to Deepgram (manual close)"""
+        try:
+            # Mark as manual close to prevent auto-reconnect
+            self.is_manual_close = True
+
+            # Stop all tasks
+            await self.stop_keepalive_task()
+            await self.stop_silence_sender()
+
             # Cancel silence timer if running
             if self.silence_timer_task and not self.silence_timer_task.done():
                 print("🔄 Cancelling silence timer on close")
@@ -221,7 +372,12 @@ class STTHandler:
             if self.dg_connection:
                 await self.dg_connection.finish()
                 self.is_connected = False
-                print("✅ Deepgram connection closed")
+                print("✅ Deepgram connection closed (manual)")
+
+            # Reset manual close flag after a short delay
+            await asyncio.sleep(0.5)
+            self.is_manual_close = False
 
         except Exception as e:
             print(f"Error closing Deepgram: {e}")
+            self.is_manual_close = False

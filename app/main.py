@@ -45,6 +45,8 @@ class ConnectionManager:
         self.is_speaking = False
         self.interrupt_requested = False
         self.interruption_enabled = config.INTERRUPTION_ENABLED
+        self.stop_audio_stream = False  # Flag to stop audio streaming
+        self.interruption_confirmation_task = None  # Timer task for confirming interruption
 
     async def initialize(self, websocket: WebSocket):
         """Initialize handlers for a new connection"""
@@ -118,7 +120,12 @@ class ConnectionManager:
         if self.is_speaking:
             if is_final and text.strip():
                 print(f"🛑 SPEECH DETECTED DURING AI PLAYBACK: '{text}'")
-                self.interrupt_requested = True
+                # Start confirmation timer if not already running
+                if not self.interruption_confirmation_task or self.interruption_confirmation_task.done():
+                    print("⏱️ Starting 0.5s confirmation timer...")
+                    self.interruption_confirmation_task = asyncio.create_task(
+                        self._confirm_interruption()
+                    )
             return
 
         # Normal listening mode - ignore if already processing
@@ -141,6 +148,22 @@ class ConnectionManager:
             "is_final": is_final,
             "full_text": self.current_transcription
         })
+
+    async def _confirm_interruption(self):
+        """Wait 0.5s to confirm interruption, then stop audio stream"""
+        try:
+            print("⏱️ Interruption confirmation: waiting 0.5s...")
+            await asyncio.sleep(0)
+
+            # Still speaking after 0.5s? Stop the stream to free CPU
+            if self.is_speaking:
+                print("✅ Interruption confirmed after 0.5s - stopping audio stream")
+                self.stop_audio_stream = True
+                self.interrupt_requested = True
+            else:
+                print("⚠️ No longer speaking - interruption timer expired without action")
+        except asyncio.CancelledError:
+            print("🔄 Interruption confirmation timer cancelled")
 
     async def on_speech_end(self):
         """Called when speech ends (silence detected)"""
@@ -232,14 +255,43 @@ class ConnectionManager:
             # Send audio to frontend
             send_start = time.time()
             print(f"\n📤 SENDING AUDIO TO FRONTEND")
+
+            # Reset stop flag before streaming
+            self.stop_audio_stream = False
+
+            # Start sending silence to Deepgram to prevent timeout
+            # This keeps connection alive for interruption detection
+            if self.stt_handler:
+                await self.stt_handler.start_silence_sender()
+
             self.is_speaking = True
             await self.send_audio(audio_stream)
             send_duration = time.time() - send_start
             print(f"✅ Audio send completed in {send_duration:.2f}s")
-            print(f"✅ Audio playback completed without interruption")
 
-            # Keep STT open for next turn (just mark as not speaking)
+            # Check if interrupted
+            if self.stop_audio_stream or self.interrupt_requested:
+                print(f"🛑 Audio stream was interrupted")
+                # Mark as not speaking first
+                self.is_speaking = False
+
+                # Stop sending silence
+                if self.stt_handler:
+                    await self.stt_handler.stop_silence_sender()
+
+                # Handle interruption
+                await self.handle_interruption()
+                return
+            else:
+                print(f"✅ Audio playback completed without interruption")
+
+            # Mark as not speaking
             self.is_speaking = False
+
+            # Stop sending silence
+            if self.stt_handler:
+                await self.stt_handler.stop_silence_sender()
+
             print("🎙️ STT remains open for next turn")
 
             # Reset for next turn
@@ -280,15 +332,31 @@ class ConnectionManager:
         print(f"🛑 HANDLING INTERRUPTION")
         print(f"{'='*60}\n")
 
+        # Cancel interruption confirmation timer if running
+        if self.interruption_confirmation_task and not self.interruption_confirmation_task.done():
+            print("🔄 Cancelling interruption confirmation timer")
+            self.interruption_confirmation_task.cancel()
+            try:
+                await self.interruption_confirmation_task
+            except asyncio.CancelledError:
+                pass
+            self.interruption_confirmation_task = None
+
         # Clear state
         self.is_speaking = False
         self.interrupt_requested = False
         self.is_processing = False
         self.current_transcription = ""
+        self.stop_audio_stream = False
 
-        # Keep STT open - just reset its state for new turn
+        # Stop silence sender and reset STT state
         if self.stt_handler:
+            # Stop silence sender if running
+            await self.stt_handler.stop_silence_sender()
+
+            # Reset state for new turn
             self.stt_handler.has_triggered_end = False
+
             # Cancel any running silence timer
             if self.stt_handler.silence_timer_task and not self.stt_handler.silence_timer_task.done():
                 self.stt_handler.silence_timer_task.cancel()
@@ -296,7 +364,7 @@ class ConnectionManager:
                     await self.stt_handler.silence_timer_task
                 except asyncio.CancelledError:
                     pass
-            print("🎙️ STT state reset, keeping connection open")
+            print("🎙️ STT state reset after interruption")
 
 
         # send signal to stop stream
@@ -368,9 +436,14 @@ class ConnectionManager:
             })
             print(f"✅ Sent audio config")
            
-            print(f"🔍 Monitoring for interruptions...")                
-            # stream audio data 
+            print(f"🔍 Monitoring for interruptions...")
+            # stream audio data
             async for pcm_chunk in audio_bytes:
+                # Check if we should stop streaming due to confirmed interruption
+                if self.stop_audio_stream:
+                    print("🛑 Stopping audio stream - interruption confirmed")
+                    break
+
                 await asyncio.sleep(0)
                 await self.websocket.send_bytes(pcm_chunk)
             
