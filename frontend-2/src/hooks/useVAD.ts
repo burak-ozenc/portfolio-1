@@ -3,7 +3,7 @@
  * Wraps @ricky0123/vad-react for speech detection
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useMicVAD } from '@ricky0123/vad-react';
 
 interface UseVADOptions {
@@ -116,29 +116,40 @@ export function useVAD(options: UseVADOptions = {}): UseVADReturn {
     config = {},
   } = options;
 
-  const userSpeakingRef = useRef(false);
+  const [userSpeaking, setUserSpeaking] = useState(false);
+
+  // Store callbacks in refs to keep them stable
+  const onSpeechStartRef = useRef(onSpeechStart);
+  const onSpeechEndRef = useRef(onSpeechEnd);
+  const onVADMisfireRef = useRef(onVADMisfire);
+
+  useEffect(() => {
+    onSpeechStartRef.current = onSpeechStart;
+    onSpeechEndRef.current = onSpeechEnd;
+    onVADMisfireRef.current = onVADMisfire;
+  }, [onSpeechStart, onSpeechEnd, onVADMisfire]);
 
   const vad = useMicVAD({
     startOnLoad: false, // Don't auto-start, we'll control it manually
 
-    // Callbacks
-    onSpeechStart: useCallback(() => {
-      // console.log('🎙️ VAD: Speech started');
-      userSpeakingRef.current = true;
-      onSpeechStart?.();
-    }, [onSpeechStart]),
+    // Callbacks - use refs to keep them stable
+    onSpeechStart: () => {
+      console.log('🎙️ VAD: Speech started - setting userSpeaking=true');
+      setUserSpeaking(true);
+      onSpeechStartRef.current?.();
+    },
 
-    onSpeechEnd: useCallback(() => {
-      // console.log('🎙️ VAD: Speech ended');
-      userSpeakingRef.current = false;
-      onSpeechEnd?.();
-    }, [onSpeechEnd]),
+    onSpeechEnd: () => {
+      console.log('🎙️ VAD: Speech ended - setting userSpeaking=false');
+      setUserSpeaking(false);
+      onSpeechEndRef.current?.();
+    },
 
-    onVADMisfire: useCallback(() => {
+    onVADMisfire: () => {
       console.log('⚠️ VAD: Misfire (false positive)');
-      userSpeakingRef.current = false;
-      onVADMisfire?.();
-    }, [onVADMisfire]),
+      setUserSpeaking(false);
+      onVADMisfireRef.current?.();
+    },
 
     // Configuration
     positiveSpeechThreshold: config.positiveSpeechThreshold ?? 0.8, // More sensitive = lower value
@@ -152,23 +163,23 @@ export function useVAD(options: UseVADOptions = {}): UseVADReturn {
   });
 
   // Auto-start/pause based on enabled prop
+  const isListening = vad?.listening ?? false;
+
   useEffect(() => {
     if (!vad) return;
 
-    if (enabled && !vad.listening) {
-      // console.log('🎙️ VAD: Starting...');
+    if (enabled && !isListening) {
       vad.start();
-    } else if (!enabled && vad.listening) {
-      // console.log('🎙️ VAD: Pausing...');
+    } else if (!enabled && isListening) {
       vad.pause();
-      userSpeakingRef.current = false;
+      setUserSpeaking(false);
     }
-  }, [enabled, vad]);
+  }, [enabled, isListening, vad]);
 
   return {
     listening: vad?.listening ?? false,
     loading: vad?.loading ?? true,
-    userSpeaking: userSpeakingRef.current,
+    userSpeaking,
     start: () => vad?.start(),
     pause: () => vad?.pause(),
     toggle: () => vad?.toggle(),

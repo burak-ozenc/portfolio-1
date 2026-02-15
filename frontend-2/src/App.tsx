@@ -7,7 +7,7 @@ import { Contact } from './components/Contact';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAudioCapture } from './hooks/useAudioCapture';
 import { useAudioPlayback } from './hooks/useAudioPlayback';
-import { useVAD } from './hooks/useVAD';
+// import { useVAD } from './hooks/useVAD';
 import type { AppState } from './types/websocket.types';
 
 function App() {
@@ -73,29 +73,29 @@ function App() {
         onError: useCallback((err: string) => setError(err), []),
     });
 
-    // Voice Activity Detection (VAD) using WASM
-    const {
-        listening: vadListening,
-        loading: vadLoading,
-        userSpeaking,
-    } = useVAD({
-        enabled: isConversationActive,
-        onSpeechStart: useCallback(() => {
-            console.log('🎙️ VAD: User started speaking');
-            // Could trigger UI updates here if needed
-        }, []),
-        onSpeechEnd: useCallback(() => {
-            console.log('🎙️ VAD: User stopped speaking');
-            // Could trigger UI updates here if needed
-        }, []),
-        config: {
-            positiveSpeechThreshold: 0.8,
-            negativeSpeechThreshold: 0.65,
-            redemptionMs: 8, // Allow brief pauses (~267ms)
-            preSpeechPadMs: 10, // Capture before speech (~333ms)
-            minSpeechMs: 5, // Minimum speech duration (~167ms)
-        },
-    });
+    // // Voice Activity Detection (VAD) using WASM
+    // const {
+    //     listening: vadListening,
+    //     loading: vadLoading,
+    //     userSpeaking,
+    // } = useVAD({
+    //     enabled: isConversationActive,
+    //     onSpeechStart: useCallback(() => {
+    //         console.log('🎙️ VAD: User started speaking');
+    //         // Could trigger UI updates here if needed
+    //     }, []),
+    //     onSpeechEnd: useCallback(() => {
+    //         console.log('🎙️ VAD: User stopped speaking');
+    //         // Could trigger UI updates here if needed
+    //     }, []),
+    //     config: {
+    //         positiveSpeechThreshold: 0.8,
+    //         negativeSpeechThreshold: 0.65,
+    //         redemptionMs: 8, // Allow brief pauses (~267ms)
+    //         preSpeechPadMs: 10, // Capture before speech (~333ms)
+    //         minSpeechMs: 5, // Minimum speech duration (~167ms)
+    //     },
+    // });
 
     /**
      * Map backend AppState to Character CharacterState
@@ -262,26 +262,8 @@ function App() {
      * Handle interruption (user speaks during AI playback)
      * Uses VAD to detect when user starts speaking during AI response
      */
-    const hasInterruptedRef = useRef(false);
-
-    useEffect(() => {
-        // Reset interruption flag when not playing
-        if (!isPlaying) {
-            hasInterruptedRef.current = false;
-            return;
-        }
-
-        // Check for interruption using VAD (only trigger once per playback session)
-        // VAD-based: more accurate than simple audio level threshold
-        if (isPlaying && userSpeaking && !hasInterruptedRef.current) {
-            console.log('🛑 User interruption detected (VAD)');
-            hasInterruptedRef.current = true;
-            sendMessage({ type: 'interrupt' });
-            stopPlayback();
-            clearQueue();
-            isStreamingRef.current = false;
-        }
-    }, [isPlaying, userSpeaking, sendMessage, stopPlayback, clearQueue]);
+    // Interruption now handled by backend STT (Deepgram)
+    // When user speaks during playback, backend detects it and sends stop signal
 
     /**
      * Manual interruption via UI button
@@ -290,7 +272,6 @@ function App() {
         if (!isPlaying) return;
 
         console.log('🛑 Manual interruption triggered');
-        hasInterruptedRef.current = true;
         sendMessage({ type: 'interrupt' });
         stopPlayback();
         clearQueue();
@@ -445,7 +426,7 @@ function App() {
                 <div>Capturing: {isCapturing ? 'Yes' : 'No'}</div>
                 <div>Playing: {isPlaying ? 'Yes' : 'No'}</div>
                 <div>Streaming: {isStreamingRef.current ? 'Yes' : 'No'}</div>
-                <div>VAD: {vadListening ? (userSpeaking ? '🟢 Speaking' : '🔵 Listening') : vadLoading ? '⏳ Loading' : '⚫ Off'}</div>
+                {/*<div>VAD: {vadListening ? (userSpeaking ? '🟢 Speaking' : '🔵 Listening') : vadLoading ? '⏳ Loading' : '⚫ Off'}</div>*/}
             </div>
         </div>
     );
