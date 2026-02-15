@@ -9,12 +9,16 @@ class TTSHandler:
         self.tts_model = TTSModel.load_model()
 
         # Load voice state
-        script_dir = Path(__file__).parent
-        voice_abs = (script_dir / config.TTS_VOICE).absolute()
+        # script_dir = Path(__file__).parent
+        # voice_abs = (script_dir / config.TTS_VOICE).absolute()
+        voice_path = download_voice_file(config.TTS_VOICE)
+
         self.voice_state = self.tts_model.get_state_for_audio_prompt(
-            voice_abs,
+            voice_path,
         )
         print("TTS model loaded successfully")
+
+        
 
     async def synthesize(self, text: str) -> bytes:
         """Synthesize text to speech audio"""
@@ -50,3 +54,19 @@ class TTSHandler:
     def get_sample_rate(self) -> int:
         """Get the sample rate of the TTS model"""
         return self.tts_model.sample_rate
+
+
+def download_voice_file(dataset_url):
+    import requests
+    import tempfile
+
+    """Download voice file from HF dataset to temp storage"""
+    response = requests.get(dataset_url)
+    response.raise_for_status()
+
+    # Create temp file with .wav extension
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
+    temp_file.write(response.content)
+    temp_file.close()
+
+    return temp_file.name

@@ -12,7 +12,13 @@ export const StatusText: React.FC<StatusTextProps> = ({ state }) => {
       case 'warming':
         return 'Connecting...';
       case 'ready':
-        return 'Ready to chat';
+        return (
+          <>
+            <span className="text-eye-blue">Ready</span>
+            {' '}
+            <span className="text-eye-red">to chat</span>
+          </>
+        );
       case 'listening':
         return 'Listening...';
       case 'thinking':
@@ -25,7 +31,7 @@ export const StatusText: React.FC<StatusTextProps> = ({ state }) => {
   };
 
   return (
-    <div className="absolute top-32 left-0 right-0 flex justify-center">
+    <div className="absolute top-32 left-0 right-0 flex justify-center px-4">
       <AnimatePresence mode="wait">
         <motion.div
           key={state}
@@ -33,7 +39,7 @@ export const StatusText: React.FC<StatusTextProps> = ({ state }) => {
           initial="hidden"
           animate="visible"
           exit="exit"
-          className="text-gray-400 text-sm tracking-widest uppercase terminal-glow"
+          className="text-gray-400 text-sm tracking-widest uppercase terminal-glow text-center"
         >
           {getText()}
         </motion.div>

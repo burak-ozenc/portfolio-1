@@ -107,18 +107,18 @@ export function useAudioPlayback(options: UseAudioPlaybackOptions = {}): UseAudi
         throw new Error('Audio context not initialized');
       }
 
-      console.log('🔊 Received audio chunk:', {
-        bufferByteLength: audioData.byteLength,
-        bufferType: Object.prototype.toString.call(audioData),
-      });
+      // console.log('🔊 Received audio chunk:', {
+      //   bufferByteLength: audioData.byteLength,
+      //   bufferType: Object.prototype.toString.call(audioData),
+      // });
 
       // Convert Int16 PCM to Float32 for Web Audio API
       const float32Data = arrayBufferToFloat32(audioData);
 
-      console.log('🔊 After conversion:', {
-        float32Length: float32Data.length,
-        firstSamples: float32Data.slice(0, 5),
-      });
+      // console.log('🔊 After conversion:', {
+      //   float32Length: float32Data.length,
+      //   firstSamples: float32Data.slice(0, 5),
+      // });
 
       // Create audio buffer
       const audioBuffer = audioContextRef.current.createBuffer(
@@ -169,11 +169,11 @@ export function useAudioPlayback(options: UseAudioPlaybackOptions = {}): UseAudi
         optionsRef.current.onPlaybackStart?.();
       }
 
-      console.log('🔊 Playing audio chunk:', {
-        sampleRate: AUDIO_RATES.TTS_SAMPLE_RATE,
-        samples: float32Data.length,
-        duration: `${(float32Data.length / AUDIO_RATES.TTS_SAMPLE_RATE).toFixed(2)}s`,
-      });
+      // console.log('🔊 Playing audio chunk:', {
+      //   sampleRate: AUDIO_RATES.TTS_SAMPLE_RATE,
+      //   samples: float32Data.length,
+      //   duration: `${(float32Data.length / AUDIO_RATES.TTS_SAMPLE_RATE).toFixed(2)}s`,
+      // });
     } catch (err) {
       console.error('❌ Audio playback error:', err);
       const errorMsg = err instanceof Error ? err.message : 'Failed to play audio';

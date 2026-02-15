@@ -83,12 +83,12 @@ export class WebSocketService {
             }
           } else {
             // Binary audio data
-            console.log('📦 Received binary data:', {
-              type: Object.prototype.toString.call(event.data),
-              isBlob: event.data instanceof Blob,
-              isArrayBuffer: event.data instanceof ArrayBuffer,
-              size: event.data.byteLength || event.data.size,
-            });
+            // console.log('📦 Received binary data:', {
+            //   type: Object.prototype.toString.call(event.data),
+            //   isBlob: event.data instanceof Blob,
+            //   isArrayBuffer: event.data instanceof ArrayBuffer,
+            //   size: event.data.byteLength || event.data.size,
+            // });
             this.notifyBinary(event.data);
           }
         };

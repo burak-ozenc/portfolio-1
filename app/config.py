@@ -18,7 +18,7 @@ class Config:
     GROQ_MODEL = "openai/gpt-oss-120b"
 
     # TTS settings
-    TTS_VOICE = "alba"  # Pocket TTS voice (will be replaced with custom voice later)
+    TTS_VOICE = "https://huggingface.co/datasets/burrak/voice-sample/resolve/main/burak.wav"  # Pocket TTS voice (will be replaced with custom voice later)
 
     # Deepgram STT settings
     DEEPGRAM_MODEL = "nova-2"  # Latest, most accurate model

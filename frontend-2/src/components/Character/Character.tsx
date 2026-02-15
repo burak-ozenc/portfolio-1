@@ -1,5 +1,5 @@
 import { motion, useAnimation } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useBlink } from '../../hooks/useBlink';
 import {
     containerVariants,
@@ -69,15 +69,14 @@ export const Character: React.FC<CharacterProps> = ({ state, audioLevel = 0 }) =
                     </radialGradient>
                 </defs>
 
-                {/* Head outline - Ellipse (5x bigger, rounded) */}
+                {/* Head outline - Hidden (no visible outline) */}
                 <motion.ellipse
                     cx="250"
                     cy="250"
                     rx="180"
                     ry="200"
                     fill="none"
-                    stroke="#E5E5E5"
-                    strokeWidth="3"
+                    stroke="none"
                     variants={headVariants}
                 />
 
@@ -177,13 +176,14 @@ export const Character: React.FC<CharacterProps> = ({ state, audioLevel = 0 }) =
                     <Waveform audioLevel={audioLevel} />
                 ) : (
                     <motion.path
-                        d="M 200 320 L 300 320"
+                        d="M 180 360 L 320 360"
                         fill="none"
                         stroke="#E5E5E5"
-                        strokeWidth="3"
+                        strokeWidth="1.5"
                         strokeLinecap="round"
+                        strokeDasharray="5 3"
                         variants={mouthVariants}
-                        initial="hidden"
+                        initial="neutral"
                         animate={state === 'warming' ? 'yawn' : 'neutral'}
                     />
                 )}
@@ -194,37 +194,53 @@ export const Character: React.FC<CharacterProps> = ({ state, audioLevel = 0 }) =
 
 // Waveform component for speaking state
 const Waveform: React.FC<{ audioLevel: number }> = ({ audioLevel }) => {
+    const [time, setTime] = useState(0);
     const bars = 25;
     const barWidth = 3;
     const gap = 2;
     const totalWidth = bars * (barWidth + gap);
     const startX = 250 - totalWidth / 2;
 
+    // Add random seed per bar (persist across renders)
+    const randomSeeds = useRef(Array.from({ length: bars }, () => Math.random() * Math.PI * 2));
+
+    // Animate continuously
+    useEffect(() => {
+        let animationFrameId: number;
+        const animate = () => {
+            setTime((prev) => prev + 0.05);
+            animationFrameId = requestAnimationFrame(animate);
+        };
+        animationFrameId = requestAnimationFrame(animate);
+        return () => cancelAnimationFrame(animationFrameId);
+    }, []);
+
     return (
         <g>
             {Array.from({ length: bars }).map((_, i) => {
-                const baseHeight = 5;
-                const waveHeight = 20;
-                const phase = (i / bars) * Math.PI * 2;
-                const height = baseHeight + Math.sin(phase + Date.now() / 200) * waveHeight * audioLevel;
+                const baseHeight = 10;
+                const waveHeight = 30;
+                const phase = (i / bars) * Math.PI * 4;
+                // Always show some animation, scale with audioLevel
+                const amplitude = Math.max(0.5, Math.min(2, audioLevel * 10));
+
+                // Add randomness to waveform
+                const baseWave = Math.abs(Math.sin(phase + time));
+                const randomWave = Math.sin(time * 1.5 + randomSeeds.current[i]) * 0.3;
+                const combinedWave = baseWave + randomWave;
+
+                const height = baseHeight + combinedWave * waveHeight * amplitude;
+                const finalHeight = Math.max(8, height);
 
                 return (
-                    <motion.rect
+                    <rect
                         key={i}
                         x={startX + i * (barWidth + gap)}
-                        y={320 - height / 2}
+                        y={360 - finalHeight / 2}
                         width={barWidth}
-                        height={height}
+                        height={finalHeight}
                         fill="#E5E5E5"
-                        initial={{ scaleY: 0.3 }}
-                        animate={{
-                            scaleY: audioLevel > 0.1 ? 1 : 0.3,
-                            height: height,
-                        }}
-                        transition={{
-                            duration: 0.1,
-                            ease: 'linear',
-                        }}
+                        rx={1}
                     />
                 );
             })}

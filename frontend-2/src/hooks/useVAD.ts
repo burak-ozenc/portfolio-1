@@ -123,13 +123,13 @@ export function useVAD(options: UseVADOptions = {}): UseVADReturn {
 
     // Callbacks
     onSpeechStart: useCallback(() => {
-      console.log('🎙️ VAD: Speech started');
+      // console.log('🎙️ VAD: Speech started');
       userSpeakingRef.current = true;
       onSpeechStart?.();
     }, [onSpeechStart]),
 
     onSpeechEnd: useCallback(() => {
-      console.log('🎙️ VAD: Speech ended');
+      // console.log('🎙️ VAD: Speech ended');
       userSpeakingRef.current = false;
       onSpeechEnd?.();
     }, [onSpeechEnd]),
@@ -156,10 +156,10 @@ export function useVAD(options: UseVADOptions = {}): UseVADReturn {
     if (!vad) return;
 
     if (enabled && !vad.listening) {
-      console.log('🎙️ VAD: Starting...');
+      // console.log('🎙️ VAD: Starting...');
       vad.start();
     } else if (!enabled && vad.listening) {
-      console.log('🎙️ VAD: Pausing...');
+      // console.log('🎙️ VAD: Pausing...');
       vad.pause();
       userSpeakingRef.current = false;
     }

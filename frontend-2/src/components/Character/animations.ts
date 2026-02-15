@@ -85,7 +85,7 @@ export const mouthVariants: Variants = {
         },
     },
     yawn: {
-        d: 'M 200 320 Q 250 370 300 320',
+        d: 'M 180 360 Q 250 410 320 360',
         transition: {
             duration: 1.5,
             ease: 'easeInOut',
@@ -93,7 +93,7 @@ export const mouthVariants: Variants = {
         },
     },
     neutral: {
-        d: 'M 200 320 L 300 320',
+        d: 'M 180 360 L 320 360',
         transition: {
             duration: 1,
             ease: 'easeInOut',

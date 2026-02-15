@@ -294,6 +294,19 @@ function App() {
         }
     }, [isPlaying, isCapturing, speakerLevel, micLevel]);
 
+    /**
+     * Override character state to 'speaking' when audio is playing
+     * This ensures waveform shows even if backend sends 'ready' too early
+     */
+    useEffect(() => {
+        if (isPlaying) {
+            setState('speaking');
+        } else if (state === 'speaking' && !isPlaying) {
+            // When playback ends, return to ready state
+            setState('ready');
+        }
+    }, [isPlaying, state]);
+
     return (
         <div className="relative w-screen h-screen bg-black overflow-hidden">
             {/* Main Character */}
@@ -334,7 +347,7 @@ function App() {
 
             {/* Response Display */}
             {response && (
-                <div className="fixed bottom-32 left-4 right-4 max-w-2xl mx-auto bg-gray-900/80 backdrop-blur-sm rounded-lg p-4 text-gray-300 text-sm">
+                <div className="fixed bottom-32 md:bottom-32 bottom-16 left-4 right-4 max-w-2xl mx-auto bg-gray-900/80 backdrop-blur-sm rounded-lg p-4 text-gray-300 text-sm">
                     <div className="text-gray-500 text-xs mb-1">AI:</div>
                     <div>{response}</div>
                 </div>
