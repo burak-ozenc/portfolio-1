@@ -41,7 +41,7 @@ COPY app/ ./app/
 COPY config/ ./config/
 
 # Copy built frontend-2 from stage 1
-COPY --from=frontend-builder /frontend-build/dist ./frontend-2-dist
+COPY --from=frontend-builder /frontend-build/dist ./frontend-2/dist
 
 # Expose port
 EXPOSE 7860
