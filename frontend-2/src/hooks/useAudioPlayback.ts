@@ -45,8 +45,12 @@ export function useAudioPlayback(options: UseAudioPlaybackOptions = {}): UseAudi
   const smoothedLevelRef = useRef(0);
   const animationFrameRef = useRef<number | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
   const isPlayingRef = useRef(false);
   const optionsRef = useRef(options);
+
+  // Detect Firefox for browser-specific handling
+  const isFirefox = /firefox/i.test(navigator.userAgent);
 
   // Keep options ref up to date
   useEffect(() => {
@@ -139,9 +143,22 @@ export function useAudioPlayback(options: UseAudioPlaybackOptions = {}): UseAudi
       analyser.fftSize = 2048;
       analyserRef.current = analyser;
 
-      // Connect: source → analyser → destination
+      // Create gain node for volume control (Firefox needs lower volume)
+      const gainNode = audioContextRef.current.createGain();
+      gainNodeRef.current = gainNode;
+
+      // Reduce volume on Firefox to minimize echo feedback
+      if (isFirefox) {
+        gainNode.gain.value = 0.5; // 50% volume on Firefox
+        console.log('🔊 Firefox detected: Reducing output volume to 50%');
+      } else {
+        gainNode.gain.value = 1.0; // 100% volume on Chrome/Edge
+      }
+
+      // Connect: source → analyser → gain → destination
       source.connect(analyser);
-      analyser.connect(audioContextRef.current.destination);
+      analyser.connect(gainNode);
+      gainNode.connect(audioContextRef.current.destination);
 
       // Handle playback end
       source.onended = () => {
@@ -205,6 +222,9 @@ export function useAudioPlayback(options: UseAudioPlaybackOptions = {}): UseAudi
       }
       currentSourceRef.current = null;
     }
+
+    // Clear gain node reference
+    gainNodeRef.current = null;
 
     // Clear queue
     audioQueueRef.current = [];

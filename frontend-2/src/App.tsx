@@ -3,6 +3,7 @@ import { Character, CharacterState } from './components/Character';
 import { StatusText } from './components/StatusText';
 import { Tagline } from './components/Tagline';
 import { NoiseDetection } from './components/NoiseDetection';
+import { Contact } from './components/Contact';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useAudioCapture } from './hooks/useAudioCapture';
 import { useAudioPlayback } from './hooks/useAudioPlayback';
@@ -16,6 +17,7 @@ function App() {
     const [response, setResponse] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isConversationActive, setIsConversationActive] = useState(false);
+    const [isContactOpen, setIsContactOpen] = useState(false);
 
     // Track if we're currently streaming audio chunks
     const isStreamingRef = useRef(false);
@@ -320,6 +322,30 @@ function App() {
 
             {/* Noise Detection */}
             <NoiseDetection isActive={state === 'ready' || state === 'listening' || state === 'speaking'} />
+
+            {/* Contact Link - Top Left */}
+            <button
+                onClick={() => setIsContactOpen(true)}
+                className="fixed top-4 left-4 text-sm font-mono text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-2 bg-gray-900/50 backdrop-blur-sm px-3 py-2 rounded-lg hover:bg-gray-900/80 z-30"
+            >
+                <svg
+                    className="w-4 h-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                >
+                    <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                    />
+                </svg>
+                Contact
+            </button>
+
+            {/* Contact Modal */}
+            <Contact isOpen={isContactOpen} onClose={() => setIsContactOpen(false)} />
 
             {/* Connection Status */}
             <div className="fixed top-4 right-4 text-xs font-mono">

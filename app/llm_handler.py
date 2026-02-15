@@ -29,9 +29,9 @@ class LLMHandler:
             model=config.GROQ_MODEL,
             messages=messages,
             temperature=0.7,
-            max_tokens=1024
+            max_tokens=2048
         )
-
+        print("Check all response", response)
         # Extract response text
         assistant_message = response.choices[0].message.content
 

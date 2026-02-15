@@ -43,6 +43,7 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const silentGainRef = useRef<GainNode | null>(null);
   const smoothedLevelRef = useRef(0);
   const isCapturingRef = useRef(false);
 
@@ -69,18 +70,25 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
 
       let stream: MediaStream;
       try {
-        // Try with ideal constraints first
+        // Enhanced echo cancellation constraints
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             channelCount: 1,
             sampleRate: { ideal: AUDIO_RATES.STT_SAMPLE_RATE },
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
+            // Standard Web Audio constraints (ideal = try hard but don't fail)
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true },
+            // Chrome/Edge-specific enhancements (ignored by Firefox)
+            googEchoCancellation: { ideal: true },
+            googAutoGainControl: { ideal: true },
+            googNoiseSuppression: { ideal: true },
+            googHighpassFilter: { ideal: true },
+            googTypingNoiseDetection: { ideal: true },
+          } as MediaTrackConstraints,
         });
       } catch (e) {
-        console.warn('⚠️ Failed with ideal constraints, trying basic audio', e);
+        console.warn('⚠️ Failed with enhanced constraints, trying basic audio', e);
         // Fallback to basic audio
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       }
@@ -132,9 +140,16 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
         options.onAudioData?.(pcmData);
       };
 
-      // Connect audio pipeline: microphone → processor → destination
+      // Create silent gain node to keep processor active without audio output
+      // ScriptProcessor needs to be connected to output to fire onaudioprocess
+      silentGainRef.current = audioContextRef.current.createGain();
+      silentGainRef.current.gain.value = 0; // Silent - no audio to speakers
+
+      // Connect audio pipeline: microphone → processor → silent gain → destination
+      // Processor stays active, but no audio feedback through speakers
       sourceRef.current.connect(processorRef.current);
-      processorRef.current.connect(audioContextRef.current.destination);
+      processorRef.current.connect(silentGainRef.current);
+      silentGainRef.current.connect(audioContextRef.current.destination);
 
       setIsCapturing(true);
       setError(null);
@@ -155,6 +170,11 @@ export function useAudioCapture(options: UseAudioCaptureOptions = {}): UseAudioC
     console.log('🛑 Stopping audio capture...');
 
     // Disconnect audio nodes
+    if (silentGainRef.current) {
+      silentGainRef.current.disconnect();
+      silentGainRef.current = null;
+    }
+
     if (processorRef.current) {
       processorRef.current.disconnect();
       processorRef.current.onaudioprocess = null;
