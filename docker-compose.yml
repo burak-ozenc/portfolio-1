@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  # Production service: serves built frontend from FastAPI
+  voice-portfolio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: voice-portfolio-assistant
+    ports:
+      - "7860:7860"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - HUGGINGFACE_HUB_TOKEN=${HF_TOKEN}
+      - HF_TOKEN=${HF_TOKEN}
+    volumes:
+      # Mount for backend hot-reload during development
+      - ./app:/app/app
+      - ./config:/app/config
+      # Note: frontend is built into image (not mounted)
+    # Override CMD for local development with hot-reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 7860 --reload
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    networks:
+      - voice-network
+
+  # Development service: Vite dev server for frontend hot-reload
+  # Runs by default alongside backend for development
+  frontend-dev:
+    image: node:20-alpine
+    container_name: frontend-dev
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules  # Use container's node_modules
+    environment:
+      - VITE_WS_URL=ws://localhost:7860/ws
+    networks:
+      - voice-network
+
+networks:
+  voice-network:
+    driver: bridge

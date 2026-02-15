@@ -1,18 +1,18 @@
 # ===================================
-# Stage 1: Build Frontend-2 with Node.js
+# Stage 1: Build frontend with Node.js
 # ===================================
 FROM node:20-alpine AS frontend-builder
 
 WORKDIR /frontend-build
 
 # Copy package files
-COPY frontend-2/package*.json ./
+COPY frontend/package*.json ./
 
 # Install dependencies
 RUN npm ci --quiet
 
 # Copy frontend source code
-COPY frontend-2/ ./
+COPY frontend/ ./
 
 # Build frontend (output: dist/)
 RUN npm run build
@@ -40,8 +40,8 @@ RUN pip install -r requirements.txt
 COPY app/ ./app/
 COPY config/ ./config/
 
-# Copy built frontend-2 from stage 1
-COPY --from=frontend-builder /frontend-build/dist ./frontend-2/dist
+# Copy built frontend from stage 1
+COPY --from=frontend-builder /frontend-build/dist ./frontend/dist
 
 # Expose port
 EXPOSE 7860

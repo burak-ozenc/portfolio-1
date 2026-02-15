@@ -16,16 +16,16 @@ config.validate()
 # Initialize FastAPI
 app = FastAPI(title="Voice Portfolio Assistant")
 
-# Frontend directory (frontend-2 built files)
-frontend_2_dir = Path(__file__).parent.parent / "frontend-2" / "dist"
+# Frontend directory (frontend built files)
+frontend_2_dir = Path(__file__).parent.parent / "frontend" / "dist"
 
-# Check if frontend-2 built files exist
+# Check if frontend built files exist
 if frontend_2_dir.exists():
-    # Serve frontend-2 static assets
+    # Serve frontend static assets
     app.mount("/assets", StaticFiles(directory=str(frontend_2_dir / "assets")), name="assets")
-    print("✅ Frontend-2 static files mounted at /assets")
+    print("✅ frontend static files mounted at /assets")
 else:
-    print("⚠️ Frontend-2 not found - run 'npm run build' in frontend-2 directory")
+    print("⚠️ frontend not found - run 'npm run build' in frontend directory")
 
 
 class ConnectionManager:
@@ -418,11 +418,11 @@ class ConnectionManager:
 
 @app.get("/")
 async def root():
-    """Serve frontend-2 (React UI)"""
+    """Serve frontend (React UI)"""
     if frontend_2_dir.exists():
         return FileResponse(frontend_2_dir / "index.html")
     else:
-        return {"error": "Frontend not found. Run 'npm run build' in frontend-2 directory."}
+        return {"error": "Frontend not found. Run 'npm run build' in frontend directory."}
 
 
 @app.websocket("/ws")
