@@ -47,19 +47,19 @@ interface UseVADOptions {
      * Redemption time (ms) - allows brief pauses in speech
      * Default: 5000ms
      */
-    redemptionFrames?: number;
+    redemptionMs?: number;
 
     /**
      * Pre-speech padding (ms) - captures audio before speech starts
      * Default: 300ms
      */
-    preSpeechPadFrames?: number;
+    preSpeechPadMs?: number;
 
     /**
      * Minimum speech frames before considering it speech
      * Default: 10
      */
-    minSpeechFrames?: number;
+    minSpeechMs?: number;
   };
 }
 
@@ -143,9 +143,9 @@ export function useVAD(options: UseVADOptions = {}): UseVADReturn {
     // Configuration
     positiveSpeechThreshold: config.positiveSpeechThreshold ?? 0.8, // More sensitive = lower value
     negativeSpeechThreshold: config.negativeSpeechThreshold ?? 0.8 - 0.15, // Speech ending threshold
-    redemptionFrames: config.redemptionFrames ?? 8, // Allow brief pauses (8 frames @ 30fps = ~267ms)
-    preSpeechPadFrames: config.preSpeechPadFrames ?? 10, // Capture 10 frames before speech (~333ms)
-    minSpeechFrames: config.minSpeechFrames ?? 5, // Minimum speech duration (5 frames @ 30fps = ~167ms)
+    redemptionMs: config.redemptionMs ?? 8, // Allow brief pauses (8 frames @ 30fps = ~267ms)
+    preSpeechPadMs: config.preSpeechPadMs ?? 10, // Capture 10 frames before speech (~333ms)
+    minSpeechMs: config.minSpeechMs ?? 5, // Minimum speech duration (5 frames @ 30fps = ~167ms)
 
     // Submission config (we don't use this, but VAD requires it)
     submitUserSpeechOnPause: false, // We handle audio capture separately

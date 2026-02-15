@@ -64,7 +64,7 @@ function App() {
         isCapturing,
         audioLevel: micLevel,
         startCapture,
-        stopCapture,
+        // stopCapture, -- disabled for now
         error: captureError,
     } = useAudioCapture({
         onAudioData: sendAudio,
@@ -89,9 +89,9 @@ function App() {
         config: {
             positiveSpeechThreshold: 0.8,
             negativeSpeechThreshold: 0.65,
-            redemptionFrames: 8, // Allow brief pauses (~267ms)
-            preSpeechPadFrames: 10, // Capture before speech (~333ms)
-            minSpeechFrames: 5, // Minimum speech duration (~167ms)
+            redemptionMs: 8, // Allow brief pauses (~267ms)
+            preSpeechPadMs: 10, // Capture before speech (~333ms)
+            minSpeechMs: 5, // Minimum speech duration (~167ms)
         },
     });
 
@@ -233,28 +233,28 @@ function App() {
         }
     }, [isConnected, startCapture, sendMessage]);
 
-    /**
-     * End conversation
-     */
-    const endConversation = useCallback(() => {
-        console.log('🛑 Ending conversation');
-
-        // Stop audio capture
-        stopCapture();
-
-        // Stop audio playback
-        stopPlayback();
-        clearQueue();
-        isStreamingRef.current = false;
-
-        // Reset conversation
-        sendMessage({ type: 'reset' });
-        setIsConversationActive(false);
-
-        // Clear UI
-        setTranscription('');
-        setResponse('');
-    }, [stopCapture, stopPlayback, clearQueue, sendMessage]);
+    // /**
+    //  * End conversation -- Disabled for now
+    //  */
+    // const endConversation = useCallback(() => {
+    //     console.log('🛑 Ending conversation');
+    //
+    //     // Stop audio capture
+    //     stopCapture();
+    //
+    //     // Stop audio playback
+    //     stopPlayback();
+    //     clearQueue();
+    //     isStreamingRef.current = false;
+    //
+    //     // Reset conversation
+    //     sendMessage({ type: 'reset' });
+    //     setIsConversationActive(false);
+    //
+    //     // Clear UI
+    //     setTranscription('');
+    //     setResponse('');
+    // }, [stopCapture, stopPlayback, clearQueue, sendMessage]);
 
     /**
      * Handle interruption (user speaks during AI playback)
